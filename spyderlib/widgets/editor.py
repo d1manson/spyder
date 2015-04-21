@@ -546,8 +546,6 @@ class EditorStack(QWidget):
                                       parent=self)
         gotoline = create_shortcut(self.go_to_line, context='Editor',
                                    name='Go to line', parent=self)
-        filelist = create_shortcut(self.open_filelistdialog, context='Editor',
-                                   name='File list management', parent=self)
         tab = create_shortcut(self.go_to_previous_file, context='Editor',
                               name='Go to previous file', parent=self)
         tabshift = create_shortcut(self.go_to_next_file, context='Editor',
@@ -560,7 +558,7 @@ class EditorStack(QWidget):
         new_shortcut("Ctrl+W", self, lambda: self.sig_close_file[()].emit())
         new_shortcut("Ctrl+F4", self, lambda: self.sig_close_file[()].emit())
         # Return configurable ones
-        return [inspect, breakpoint, cbreakpoint, gotoline, filelist, tab,
+        return [inspect, breakpoint, cbreakpoint, gotoline, tab,
                 tabshift]
 
     def get_shortcut_data(self):
