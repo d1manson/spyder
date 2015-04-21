@@ -894,13 +894,6 @@ class Editor(SpyderPluginWidget):
                       tip=_("Replace tab characters by space characters"),
                       triggered=self.fix_indentation)
 
-        gotoline_action = create_action(self, _("Go to line..."),
-                                        icon=get_icon("gotoline.png"),
-                                        triggered=self.go_to_line,
-                                        context=Qt.WidgetShortcut)
-        self.register_shortcut(gotoline_action, context="Editor",
-                               name="Go to line")
-
         workdir_action = create_action(self,
                 _("Set console working directory"),
                 icon=get_std_icon('DirOpenIcon'),
@@ -937,9 +930,8 @@ class Editor(SpyderPluginWidget):
                                 self.unindent_action, self.indent_action]
         self.main.edit_toolbar_actions += edit_toolbar_actions
         
-        self.search_menu_actions = [gotoline_action]
+        self.search_menu_actions = []
         self.main.search_menu_actions += self.search_menu_actions
-        self.main.search_toolbar_actions += [gotoline_action]
           
         # ---- Run menu/toolbar construction ----
         run_menu_actions = [run_action, run_cell_action,
@@ -987,11 +979,11 @@ class Editor(SpyderPluginWidget):
                      unblockcomment_action, self.winpdb_action]
         self.file_dependent_actions = self.pythonfile_dependent_actions + \
                 [self.save_action, save_as_action, print_preview_action,
-                 self.print_action, self.save_all_action, gotoline_action,
+                 self.print_action, self.save_all_action,
                  workdir_action, self.close_action, self.close_all_action,
                  self.toggle_comment_action, self.revert_action,
                  self.indent_action, self.unindent_action]
-        self.stack_menu_actions = [gotoline_action, workdir_action]
+        self.stack_menu_actions = [workdir_action]
         
         return self.file_dependent_actions
     
