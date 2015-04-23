@@ -528,7 +528,6 @@ DEFAULTS = [
               'editor/open file': "Ctrl+O",
               'editor/save file': "Ctrl+S",
               'editor/save all': "Ctrl+Shift+S",
-              'editor/print': "Ctrl+E",
               'editor/close all': "Ctrl+Shift+W",
               'editor/breakpoint': 'F12',
               'editor/conditional breakpoint': 'Shift+F12',
