@@ -645,8 +645,6 @@ class Editor(SpyderPluginWidget):
         self.print_action = create_action(self, _("&Print..."),
                 icon='print.png', tip=_("Print current file..."),
                 triggered=self.print_file)
-        self.register_shortcut(self.print_action, context="Editor",
-                               name="Print")
         # Shortcut for close_action is defined in widgets/editor.py
         self.close_action = create_action(self, _("&Close"),
                 icon='fileclose.png', tip=_("Close current file"),
