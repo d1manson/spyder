@@ -586,7 +586,7 @@ class MainWindow(QMainWindow):
                                             triggered=self.call_file_switcher,
                                             context=Qt.ApplicationShortcut)
             self.register_shortcut(self.file_switcher_action, "_",
-                                           "file switcher")
+                                   "file switcher")
             self.file_menu_actions.append(self.file_switcher_action)
             def create_edit_action(text, tr_text, icon_name):
                 textseq = text.split(' ')
