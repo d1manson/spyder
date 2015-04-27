@@ -30,7 +30,8 @@ def make_meta_dict(value):
     the caller, and a default empty dict will be returned.  The exception 
     stacktrace will be printed.    
     """
-    if isinstance(value, (bool, int, float, tuple, list, set, dict)):
+    if isinstance(value, (bool, int, float, tuple, list, set, dict, 
+                          basestring)):
         return {}
         
     meta = OrderedDict()
@@ -38,10 +39,11 @@ def make_meta_dict(value):
         pass
     
     try:
-        from numpy import ndarray
+        from numpy import ndarray, ScalarType
         from numpy.ma import MaskedArray
     except ImportError:
         ndarray = MaskedArray = DudObject  # analysis:ignore
+        ScalarType = () # analysis:ignore
         
     try:
         from pandas import DataFrame, TimeSeries
@@ -53,7 +55,14 @@ def make_meta_dict(value):
     except ImportError:
         Image = DudObject # analysis:ignore
         
-    if isinstance(value, (ndarray, MaskedArray)):   
+    try:
+        from datetime import date
+    except ImportError:
+        datetime = DudObject  # analysis:ignore
+        
+    if isinstance(value, ScalarType + (date,)):
+        pass # dont try html or docstring        
+    elif isinstance(value, (ndarray, MaskedArray)):   
         meta.update(make_numpy_meta_dict(value))
     elif isinstance(value, DataFrame):
         meta['html'] = value.describe().to_html()
