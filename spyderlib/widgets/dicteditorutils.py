@@ -13,8 +13,7 @@ from __future__ import print_function
 import re
 
 # Local imports
-from spyderlib.py3compat import (NUMERIC_TYPES, TEXT_TYPES, to_text_string,
-                                 is_text_string, is_binary_string, reprlib)
+from spyderlib.py3compat import (to_text_string, is_text_string, is_binary_string, reprlib)
 from spyderlib.utils import programs
 from spyderlib import dependencies
 from spyderlib.baseconfig import _
@@ -74,10 +73,7 @@ except ImportError:
 
 
 #----Misc.
-def address(obj):
-    """Return object address as a string: '<classname @ address>'"""
-    return "<%s @ %s>" % (obj.__class__.__name__,
-                          hex(id(obj)).upper().replace('X', 'x'))
+
 
 
 #----Set limits for the amount of elements in the repr of collections
@@ -104,48 +100,6 @@ def datestr_to_datetime(value):
     return v
 
 
-#----Background colors for supported types
-ARRAY_COLOR = "#00ff00"
-SCALAR_COLOR = "#0000ff"
-COLORS = {
-          bool:               "#ff00ff",
-          NUMERIC_TYPES:      SCALAR_COLOR,
-          list:               "#ffff00",
-          dict:               "#00ffff",
-          tuple:              "#c0c0c0",
-          TEXT_TYPES:         "#800000",
-          (ndarray,
-           MaskedArray,
-           matrix,
-           DataFrame,
-           TimeSeries):       ARRAY_COLOR,
-          Image:              "#008000",
-          datetime.date:      "#808000",
-          }
-CUSTOM_TYPE_COLOR = "#7755aa"
-UNSUPPORTED_COLOR = "#ffffff"
-
-def get_color_name(value):
-    """Return color name depending on value type"""
-    if not is_known_type(value):
-        return CUSTOM_TYPE_COLOR
-    for typ, name in list(COLORS.items()):
-        if isinstance(value, typ):
-            return name
-    else:
-        np_dtype = get_numpy_dtype(value)
-        if np_dtype is None or not hasattr(value, 'size'):
-            return UNSUPPORTED_COLOR
-        elif value.size == 1:
-            return SCALAR_COLOR
-        else:
-            return ARRAY_COLOR
-
-def is_editable_type(value):
-    """Return True if data type is editable with a standard GUI-based editor,
-    like DictEditor, ArrayEditor, QDateEdit or a simple QLineEdit"""
-    return get_color_name(value) not in (UNSUPPORTED_COLOR, CUSTOM_TYPE_COLOR)
-
 
 #----Sorting
 def sort_against(lista, listb, reverse=False):
@@ -161,19 +115,83 @@ def unsorted_unique(lista):
 
 
     
-#----Display <--> Value
-def value_to_display(value, truncate=False, trunc_len=80, minmax=False):
-    """Convert value for display purpose"""
-    if minmax and isinstance(value, (ndarray, MaskedArray)):
-        if value.size == 0:
-            return repr(value)
-        try:
-            return 'Min: %r\nMax: %r' % (value.min(), value.max())
-        except TypeError:
-            pass
-        except ValueError:
-            # Happens when one of the array cell contains a sequence
-            pass
+
+#-------- get_basic_props stuff
+
+def get_basic_props(self, key, value):
+    """ 
+    This is called by monitor.
+    
+    key: key name of variable 
+    type_str: the type name to display when in non-compact mode
+                and at the top of the tooltip in compact mode
+    size_str: same as type_str but for the size_str
+    value_str: full str to display in non-compact mode, may need to truncate.
+    flag_colors: tuple of hex color codes to pass into a QColor(..)
+                these are rendered as a flag in the delegate's paint event.
+    editor_switch: string name indicating what kind of editor to launch
+                see createEditor in delegate for details.                    
+    plot_switch_tuple - list of plot types to show in context menu
+                see ???? in tableview for details
+    The additional data for the tooltip in compact mode is provided
+    in get_meta_dict.
+    """        
+    props = {'key': key, 
+             'type_str': value_to_type_str(value),
+             'size_str':  value_to_size_str(value),                 
+             'editor_switch': value_to_editor_switch(value),
+             'plot_switch_tuple': value_to_plot_tuple(value), 
+             'value_str': value_to_str(value), 
+             'flag_colors': value_to_color_tuple(value)
+             }
+    return props
+        
+from inspect import getmro
+from binascii import crc32
+
+def value_to_type_str(item):
+    """Return human-readable type string of an item"""
+    if isinstance(item, (ndarray, MaskedArray)):
+        return item.dtype.name
+    elif isinstance(item, Image):
+        return "Image"
+    elif isinstance(item, DataFrame):
+        return "DataFrame"
+    elif isinstance(item, TimeSeries):
+        return "TimeSeries"    
+    else:
+        found = re.findall(r"<(?:type|class) '(\S*)'>", str(type(item)))
+        if found:
+            return found[0].split('.', 1)[-1]
+        else:
+            return 'unknown'
+
+def value_to_size_str(item):
+    """Return size of an item of arbitrary type"""
+    if isinstance(item, (list, tuple, dict, set)):
+        s = len(item)
+    elif isinstance(item, (ndarray, MaskedArray)):
+        s = item.shape
+    elif isinstance(item, Image):
+        s = item.size
+    if isinstance(item, (DataFrame, TimeSeries)):
+        s = item.shape
+    elif hasattr(item,'__len__'):
+        s = len(item)
+    else:
+        s = 1
+        
+    if hasattr(s, '__len__'):
+        return ' x '.join([str(ss) for ss in s])
+    else:
+        return str(s)
+    
+
+def value_to_str(value):   
+    # <classname @ address>
+    address = lambda obj: "<%s @ %s>" % (obj.__class__.__name__,
+                              hex(id(obj)).upper().replace('X', 'x'))
+    
     if isinstance(value, Image):
         return '%s  Mode: %s' % (address(value), value.mode)
     if isinstance(value, DataFrame):
@@ -182,108 +200,87 @@ def value_to_display(value, truncate=False, trunc_len=80, minmax=False):
         return 'Column names: ' + ', '.join(list(cols))
     if is_binary_string(value):
         try:
-            value = to_text_string(value, 'utf8')
+            return to_text_string(value, 'utf8')
         except:
-            pass
+            return value
     if not is_text_string(value):
         if isinstance(value, (list, tuple, dict, set)):
-            value = CollectionsRepr.repr(value)
+            return CollectionsRepr.repr(value)
         else:
-            value = repr(value)
-    if truncate and len(value) > trunc_len:
-        value = value[:trunc_len].rstrip() + ' ...'
-    return value
+            return repr(value)
 
-def try_to_eval(value):
-    """Try to eval value"""
+    
+def value_to_color_tuple(value):
+    """ Hashes the names of base classes into a list of hex colors    
+    """
     try:
-        return eval(value)
-    except (NameError, SyntaxError, ImportError):
-        return value
+        mro = getmro(value)
+    except AttributeError:
+        try:
+            mro = getmro(type(value))
+        except Exception:
+            mro = []
+    str_to_color = lambda s: '#' + hex(crc32(s) & 0xffffff)[2:]
+    return tuple(str_to_color(getattr(t, '__name__', 'none')) for t in mro)
+
+def value_to_plot_tuple(value):
+    """ Returns a list of strings indicating what plots to offer for given value.
+    """
+    return () # TODO: this
     
-def get_size(item):
-    """Return size of an item of arbitrary type"""
-    if isinstance(item, (list, tuple, dict)):
-        return len(item)
-    elif isinstance(item, (ndarray, MaskedArray)):
-        return item.shape
-    elif isinstance(item, Image):
-        return item.size
-    if isinstance(item, (DataFrame, TimeSeries)):
-        return item.shape
-    else:
-        return 1
-
-def get_type_string(item):
-    """Return type string of an object"""
-    if isinstance(item, DataFrame):
-        return "DataFrame"
-    if isinstance(item, TimeSeries):
-        return "TimeSeries"    
-    found = re.findall(r"<(?:type|class) '(\S*)'>", str(type(item)))
-    if found:
-        return found[0]
     
+def value_to_editor_switch(value):
+    """ Returns a string saying which kind of editor to use or None
+    """
+    return None # TODO: this
+    
+#-----Make meta dict stuff
+    
+import os.path as osp
+from spyderlib.config import CONF
 
-def is_known_type(item):
-    """Return True if object has a known type"""
-    # Unfortunately, the masked array case is specific
-    return isinstance(item, MaskedArray) or get_type_string(item) is not None
+# On startup, find the required implementation
+make_meta_dict_inner_func = None
 
-def get_human_readable_type(item):
-    """Return human-readable type string of an item"""
-    if isinstance(item, (ndarray, MaskedArray)):
-        return item.dtype.name
-    elif isinstance(item, Image):
-        return "Image"
-    else:
-        text = get_type_string(item)
-        if text is None:
-            text = to_text_string('unknown')
-        else:
-            return text[text.find('.')+1:]
+mod_custom_path = CONF.get('variable_explorer', 'make_meta_dict', False)
+makemetadict_def = CONF.get('variable_explorer', 'makemetadict/default', False)
+
+if not makemetadict_def and osp.exists(str(mod_custom_path)):
+    # Loading a module form file path seems to be messy:
+    # http://stackoverflow.com/a/67692/2399799
+    mod_custom_name, _ = osp.splitext(mod_custom_path)
+    mod = None
+    try:
+        import imp
+        mod = imp.load_source(mod_custom_name, mod_custom_path)
+    except Exception:
+        try:
+            import importlib.machinery
+            mod = importlib.machinery\
+                            .SourceFileLoader(mod_custom_name, mod_custom_path)\
+                            .load_module(mod_custom_name)
+        except Exception:
+            pass  # mod is still None, use default...
+    if mod is not None:
+        make_meta_dict_inner_func = getattr(mod, 'make_meta_dict', None)
+        
+if make_meta_dict_inner_func is None:
+    from spyderlib.make_meta_dict_default import make_meta_dict
+    make_meta_dict_inner_func = make_meta_dict
 
 
-#----Globals filter: filter namespace dictionaries (to be edited in DictEditor)
-def is_supported(value, check_all=False, filters=None, iterate=True):
-    """Return True if the value is supported, False otherwise"""
-    assert filters is not None
-    if not is_editable_type(value):
-        return False
-    elif not isinstance(value, filters):
-        return False
-    elif iterate:
-        if isinstance(value, (list, tuple, set)):
-            for val in value:
-                if not is_supported(val, filters=filters, iterate=check_all):
-                    return False
-                if not check_all:
-                    break
-        elif isinstance(value, dict):
-            for key, val in list(value.items()):
-                if not is_supported(key, filters=filters, iterate=check_all) \
-                   or not is_supported(val, filters=filters,
-                                       iterate=check_all):
-                    return False
-                if not check_all:
-                    break
-    return True
+def make_meta_dict(value):
+    """
+    This wraps the user's code, giving a stacktrace on errors, but still
+    returning a valid output.  The idea is that the make_meta_dict_func
+    is located in a separate file that can be modified by the user 
+    (like the startup.py scripts).
+    """
+    try:
+        return make_meta_dict_inner_func(value)
+    except Exception:
+        import traceback
+        print(traceback.format_exc())
+        return {}
 
-def globalsfilter(input_dict, check_all=False, filters=None,
-                  exclude_private=None, exclude_capitalized=None,
-                  exclude_uppercase=None, exclude_unsupported=None,
-                  excluded_names=None):
-    """Keep only objects that can be pickled"""
-    output_dict = {}
-    for key, value in list(input_dict.items()):
-        excluded = (exclude_private and key.startswith('_')) or \
-                   (exclude_capitalized and key[0].isupper()) or \
-                   (exclude_uppercase and key.isupper()
-                    and len(key) > 1 and not key[1:].isdigit()) or \
-                   (key in excluded_names) or \
-                   (exclude_unsupported and \
-                    not is_supported(value, check_all=check_all,
-                                     filters=filters))
-        if not excluded:
-            output_dict[key] = value
-    return output_dict
+

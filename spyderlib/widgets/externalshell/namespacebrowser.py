@@ -109,30 +109,10 @@ class NamespaceBrowser(QWidget):
         
         # Dict editor:
         if self.is_internal_shell:
-            self.editor = DictEditorTableView(self, None, truncate=truncate,
-                                              minmax=minmax)
+            self.editor = DictEditorTableView(self)
         else:
-            self.editor = RemoteDictEditorTableView(self, None,
-                            truncate=truncate, minmax=minmax, compact=True, 
-                            remote_editing=remote_editing,
-                            get_value_func=self.get_value,
-                            set_value_func=self.set_value,
-                            new_value_func=self.set_value,
-                            remove_values_func=self.remove_values,
-                            copy_value_func=self.copy_value,
-                            is_list_func=self.is_list,
-                            get_len_func=self.get_len,
-                            is_array_func=self.is_array,
-                            get_meta_dict_func=self.get_meta_dict,
-                            is_image_func=self.is_image,
-                            is_dict_func=self.is_dict,
-                            is_data_frame_func=self.is_data_frame,
-                            is_time_series_func=self.is_time_series,                       
-                            get_array_shape_func=self.get_array_shape,
-                            get_array_ndim_func=self.get_array_ndim,
-                            oedit_func=self.oedit,
-                            plot_func=self.plot, imshow_func=self.imshow,
-                            show_image_func=self.show_image)
+            self.editor = RemoteDictEditorTableView(self)
+            
         self.editor.sig_option_changed.connect(self.sig_option_changed.emit)
         self.editor.sig_files_dropped.connect(self.import_data)
         
@@ -272,28 +252,6 @@ class NamespaceBrowser(QWidget):
         """Return socket connection"""
         return self.shellwidget.introspection_socket
     
-    def get_internal_shell_filter(self, mode, check_all=None):
-        """
-        Return internal shell data types filter:
-            * check_all: check all elements data types for sequences
-              (dict, list, tuple)
-            * mode (string): 'editable' or 'picklable'
-        """
-        assert mode in list(SUPPORTED_TYPES.keys())
-        if check_all is None:
-            check_all = self.check_all
-        def wsfilter(input_dict, check_all=check_all,
-                     filters=tuple(SUPPORTED_TYPES[mode])):
-            """Keep only objects that can be pickled"""
-            return globalsfilter(
-                         input_dict, check_all=check_all, filters=filters,
-                         exclude_private=self.exclude_private,
-                         exclude_uppercase=self.exclude_uppercase,
-                         exclude_capitalized=self.exclude_capitalized,
-                         exclude_unsupported=self.exclude_unsupported,
-                         excluded_names=self.excluded_names)
-        return wsfilter
-
     def get_view_settings(self):
         """Return dict editor view settings"""
         settings = {}
@@ -307,14 +265,11 @@ class NamespaceBrowser(QWidget):
         if self.is_visible and self.isVisible():
             if self.is_internal_shell:
                 # Internal shell
-                wsfilter = self.get_internal_shell_filter('editable')
-                self.editor.set_filter(wsfilter)
                 interpreter = self.shellwidget.interpreter
                 if interpreter is not None:
                     self.editor.set_data(interpreter.namespace)
                     self.editor.adjust_columns()
             elif self.shellwidget.is_running():
-    #            import time; print >>STDOUT, time.ctime(time.time()), "Refreshing namespace browser"
                 sock = self._get_sock()
                 if sock is None:
                     return
@@ -325,12 +280,17 @@ class NamespaceBrowser(QWidget):
                     pass                
                 
     def process_remote_view(self, remote_view):
+        raise NotImplementedError
         """Process remote view"""
+        """
         if remote_view is not None:
             self.set_data(remote_view)
+        """
         
     #------ Remote Python process commands ------------------------------------
     def get_value(self, name):
+        raise NotImplementedError
+        """
         value = monitor_get_global(self._get_sock(), name)
         if value is None:
             if communicate(self._get_sock(), '%s is not None' % name):
@@ -339,64 +299,37 @@ class NamespaceBrowser(QWidget):
                                      % name)
                 raise pickle.PicklingError(msg)
         return value
+        """
         
     def set_value(self, name, value):
+        raise NotImplementedError
+        """
         monitor_set_global(self._get_sock(), name, value)
         self.refresh_table()
+        """
         
     def remove_values(self, names):
+        raise NotImplementedError
+        """
         for name in names:
             monitor_del_global(self._get_sock(), name)
         self.refresh_table()
+        """
         
     def copy_value(self, orig_name, new_name):
+        raise NotImplementedError
+        """        
         monitor_copy_global(self._get_sock(), orig_name, new_name)
         self.refresh_table()
+        """
         
-    def is_list(self, name):
-        """Return True if variable is a list or a tuple"""
-        return communicate(self._get_sock(),
-                           'isinstance(%s, (tuple, list))' % name)
-        
-    def is_dict(self, name):
-        """Return True if variable is a dictionary"""
-        return communicate(self._get_sock(), 'isinstance(%s, dict)' % name)
-        
-    def get_len(self, name):
-        """Return sequence length"""
-        return communicate(self._get_sock(), "len(%s)" % name)
-
     def get_meta_dict(self, name):
         """Return dict of meta data"""
         return communicate(self._get_sock(), 'get_meta_dict("%s")' % name)
-            
-    def is_array(self, name):
-        """Return True if variable is a NumPy array"""
-        return communicate(self._get_sock(), 'is_array("%s")' % name)
-        
-    def is_image(self, name):
-        """Return True if variable is a PIL.Image image"""
-        return communicate(self._get_sock(), 'is_image("%s")' % name)
-    
-    def is_data_frame(self, name):
-        """Return True if variable is a data_frame"""
-        return communicate(self._get_sock(),
-             "isinstance(globals()['%s'], DataFrame)" % name)
-    
-    def is_time_series(self, name):
-        """Return True if variable is a data_frame"""
-        return communicate(self._get_sock(),
-             "isinstance(globals()['%s'], TimeSeries)" % name)   
-        
-    def get_array_shape(self, name):
-        """Return array's shape"""
-        return communicate(self._get_sock(), "%s.shape" % name)
-        
-    def get_array_ndim(self, name):
-        """Return array's ndim"""
-        return communicate(self._get_sock(), "%s.ndim" % name)
-        
+                  
     def plot(self, name, funcname):
+        raise NotImplementedError
+        """
         command = "import spyderlib.pyplot; "\
                   "__fig__ = spyderlib.pyplot.figure(); "\
                   "__items__ = getattr(spyderlib.pyplot, '%s')(%s); "\
@@ -407,8 +340,11 @@ class NamespaceBrowser(QWidget):
                                                                    name))
         else:
             self.shellwidget.send_to_process(command)
+        """
         
     def imshow(self, name):
+        raise NotImplementedError
+        """
         command = "import spyderlib.pyplot; " \
                   "__fig__ = spyderlib.pyplot.figure(); " \
                   "__items__ = spyderlib.pyplot.imshow(%s); " \
@@ -417,25 +353,35 @@ class NamespaceBrowser(QWidget):
             self.ipyclient.shellwidget.execute("%%varexp --imshow %s" % name)
         else:
             self.shellwidget.send_to_process(command)
+        """
         
     def show_image(self, name):
+        raise NotImplementedError
+        """
         command = "%s.show()" % name
         if self.is_ipykernel:
             self.ipyclient.shellwidget.execute(command)
         else:
             self.shellwidget.send_to_process(command)
+        """
         
     def oedit(self, name):
+        raise NotImplementedError
+        """
         command = "from spyderlib.widgets.objecteditor import oedit; " \
                   "oedit('%s', modal=False, namespace=locals());" % name
         self.shellwidget.send_to_process(command)
+        """
         
     #------ Set, load and save data -------------------------------------------
     def set_data(self, data):
         """Set data"""
+        raise NotImplementedError
+        """
         if data != self.editor.model.get_data():
             self.editor.set_data(data)
             self.editor.adjust_columns()
+        """
         
     def collapse(self):
         """Collapse"""
@@ -444,6 +390,8 @@ class NamespaceBrowser(QWidget):
     @Slot(list)
     def import_data(self, filenames=None):
         """Import data from text file"""
+        raise NotImplementedError
+        """
         title = _("Import data")
         if filenames is None:
             if self.filename is None:
@@ -524,10 +472,13 @@ class NamespaceBrowser(QWidget):
                                        "<br><br>Error message:<br>%s"
                                        ) % (self.filename, error_message))
             self.refresh_table()
-            
+         """
+         
     @Slot()
     def save_data(self, filename=None):
         """Save data"""
+        raise NotImplementedError
+        """
         if filename is None:
             filename = self.filename
             if filename is None:
@@ -557,4 +508,4 @@ class NamespaceBrowser(QWidget):
                             _("<b>Unable to save current workspace</b>"
                               "<br><br>Error message:<br>%s") % error_message)
         self.save_button.setEnabled(self.filename is not None)
-        
+        """
