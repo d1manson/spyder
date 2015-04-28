@@ -168,6 +168,7 @@ DEFAULTS = [
               'vertical_tabs': False,
               'animated_docks': True,
               'prompt_on_exit': False,
+              'panes_locked': True,
               'window/size': (1260, 740),
               'window/position': (10, 10),
               'window/is_maximized': True,
@@ -472,11 +473,12 @@ DEFAULTS = [
               # ---- Global ----
               # -- In spyder.py
               '_/close pane': "Shift+Ctrl+F4",
+              '_/lock unlock panes': "Shift+Ctrl+F5",
               '_/preferences': "Ctrl+Alt+Shift+P",
               '_/maximize pane': "Ctrl+Alt+Shift+M",
               '_/fullscreen mode': "F11",
-              '_/toggle next layout': "Shift+Alt+PgDown",
-              '_/toggle previous layout': "Shift+Alt+PgUp",
+              '_/use next layout': "Shift+Alt+PgDown",
+              '_/use previous layout': "Shift+Alt+PgUp",
               '_/save current layout': "Shift+Alt+S",
               '_/toggle default layout': "Shift+Alt+Home",
               '_/layout preferences': "Shift+Alt+P",
