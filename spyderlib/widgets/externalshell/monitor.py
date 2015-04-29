@@ -352,7 +352,7 @@ class Monitor(threading.Thread):
         if keys_path is not None:
             for key in keys_path:
                 ns = ns[key]
-                    
+        
         if isinstance(ns, (list, tuple)):
             return tuple(get_basic_props(idx, val) for idx, val in enumerate(idx))
         elif isinstance(ns, ndarray):

@@ -36,7 +36,7 @@ from spyderlib.qt.QtCore import (Qt, QModelIndex, QAbstractTableModel, Signal,
                                  QDateTime, Slot, QObject)
 from spyderlib.qt.compat import to_qvariant, from_qvariant, getsavefilename
 from spyderlib.utils.qthelpers import mimedata2url
-
+from spyderlib.widgets.externalshell.monitor import communicate
 import sys
 import datetime
 
@@ -93,11 +93,11 @@ class BaseTableModel(QAbstractTableModel):
         'value_str': _('value')
     }
     
-    def __init__(self, parent, command):
+    def __init__(self, parent, communicate, key_path=(), data=()):
         QAbstractTableModel.__init__(self, parent)
-        self._data = () # empty tuple
-        self.key_path = ()
-        self.command = command
+        self._data = data
+        self.key_path = key_path or () # if key_path was None
+        self.communicate = communicate
         
     def get_color_tuple(self, index, ignore_column=False):
         """Custom method used by Delegate.paint
@@ -118,8 +118,9 @@ class BaseTableModel(QAbstractTableModel):
         we choose to do it here instead as it allows us a bit more control.
         """
         basic_props = self._data[index.row()]
-        meta_props = self.command('make_meta_dict', 
-                                  self.key_path + (basic_props['key'],)) 
+        cmd = 'get_meta_dict(%s)' % str((self.key_path + (basic_props['key'],)))
+        print(cmd)        
+        meta_props = self.communicate(cmd)
         
         value = basic_props['value_str']            
         if len(value) > 2000:
@@ -147,24 +148,29 @@ class BaseTableModel(QAbstractTableModel):
                        meta_str, html_str, value_str)
                     
     def columnCount(self, qindex=QModelIndex()):
-        """Total number of displayable columns"""
+        """Implement BaseClass's abstract method.
+        Total number of displayable columns"""
         return len(self.columns_keys)
-            
+
+    def rowCount(self, qindex=QModelIndex()):
+        """Implement BaseClass's abstract method.
+        Total number of displayable rows"""
+        return len(self._data)
+        
     def data(self, index, role=Qt.DisplayRole):
         """Implement BaseClass's method, to provide info about a given cell."""
         if not index.isValid():
             return to_qvariant()
             
         props = self._data[index.row()]
-        
         if role == Qt.DisplayRole:
-            return to_qvariant(props[self.column_keys[index.column()]])
+            return to_qvariant(props[self.columns_keys[index.column()]])
         elif role == Qt.EditRole:
             raise NotImplementedError
         elif role == Qt.TextAlignmentRole:
             return to_qvariant(int(Qt.AlignLeft|Qt.AlignVCenter))
         elif role == Qt.FontRole:
-            if self.column_keys[index.column()] == 'value_str':
+            if self.columns_keys[index.column()] == 'value_str':
                 return to_qvariant(get_font('dicteditor'))
             else:
                 return to_qvariant(get_font('dicteditor_header'))
@@ -195,6 +201,8 @@ class BaseTableView(QTableView):
     
     def __init__(self, parent):
         QTableView.__init__(self, parent)
+        self.setItemDelegate(BaseTableViewDelegate(self))
+        self.horizontalHeader().setStretchLastSection(True)
         self.custom_tooltip = None 
         self.tooltip_index = None
         self.compact_mode_column = 0
@@ -348,8 +356,9 @@ class BaseTableViewDelegate(QItemDelegate):
             painter.save()
             rect = options.rect
             w = 4
+            left = rect.right() - len(color_tuple)*w
             for ii, c in enumerate(color_tuple):
-                painter.fillRect(rect.right()-(ii+1)*w,rect.top(),w, rect.height(),
+                painter.fillRect(left + ii*w,rect.top(),w, rect.height(),
                              QColor(c))
             painter.restore()
         QItemDelegate.paint(self, painter, options, index)
@@ -421,6 +430,26 @@ class CustomTooltip(QDialog):
 from spyderlib.plugins.variableexplorer import (VariableExplorerConfigPage, 
     SpyderPluginMixin)
 
+class ShellWrapper():
+    """ShellWrapper holds reference to a shell (e.g. an IPython shell.)
+    It knows how to send commands to the shell and get answers back.
+    """
+    def __init__(self, shell):
+        """shell is a shellwidget"""
+        from spyderlib.widgets import internalshell
+        self.shell = shell
+        self.shell_id = id(shell)
+        self.is_internal = isinstance(shell, internalshell.InternalShell),
+        self.is_ipykernel = shell.is_ipykernel
+        
+    def communicate(self, command, settings={}):
+        """Sends a command to the shell and gets return value.
+        See monitor.py for available commands and meanings.        
+        """
+        socket = self.shell.introspection_socket
+        if socket is not None:
+            return communicate(socket, command, settings)
+            
 class VariableExplorer(QWidget, SpyderPluginMixin):
     """
     Variable Explorer Plugin. It is the outermost widget. For now it simply
@@ -439,14 +468,22 @@ class VariableExplorer(QWidget, SpyderPluginMixin):
         vlayout.addWidget(self.editor)
         self.setLayout(vlayout)
         self.refresh_table()
-        
+        self.id_to_shell_wrapper = {}
+
     def refresh_table(self):
         pass
 
-    def set_shellwidget_from_id(self, id):
-        pass
+    def set_shellwidget_from_id(self, id_):
+        if id_ in self.id_to_shell_wrapper:
+            comminicate_foo = self.id_to_shell_wrapper[id_].communicate 
+            root_data = comminicate_foo('get_props_for_variable_explorer()')
+            if root_data is not None:
+                model = BaseTableModel(self.editor, comminicate_foo,
+                                       None, root_data)
+                self.editor.setModel(model)
+            
     def add_shellwidget(self, shell):
-        pass
+        self.id_to_shell_wrapper[id(shell)] = ShellWrapper(shell) 
 
     #------ SpyderPluginWidget API ---------------------------------------------
     def get_plugin_title(self):

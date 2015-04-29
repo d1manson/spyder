@@ -118,7 +118,7 @@ def unsorted_unique(lista):
 
 #-------- get_basic_props stuff
 
-def get_basic_props(self, key, value):
+def get_basic_props(key, value):
     """ 
     This is called by monitor.
     
@@ -136,16 +136,26 @@ def get_basic_props(self, key, value):
     The additional data for the tooltip in compact mode is provided
     in get_meta_dict.
     """        
-    props = {'key': key, 
-             'type_str': value_to_type_str(value),
-             'size_str':  value_to_size_str(value),                 
-             'editor_switch': value_to_editor_switch(value),
-             'plot_switch_tuple': value_to_plot_tuple(value), 
-             'value_str': value_to_str(value), 
-             'flag_colors': value_to_color_tuple(value)
-             }
+    props = {'key': key,
+             'type_str': 'unkown',
+             'size_str': 'unkown',
+             'editor_switch': None,
+             'plot_switch_tuple': (), 
+             'value_str': 'unkown', 
+             'flag_colors': (),
+            }
+
+    try:
+         props['type_str'] = value_to_type_str(value)
+         props['flag_colors'] = value_to_color_tuple(value)
+         props['size_str'] =  value_to_size_str(value)                 
+         props['editor_switch'] = value_to_editor_switch(value)
+         props['plot_switch_tuple'] = value_to_plot_tuple(value) 
+         props['value_str'] = value_to_str(value)
+    except Exception:
+        props['error_str'] = 'TODO: send error info here'
     return props
-        
+           
 from inspect import getmro
 from binascii import crc32
 
