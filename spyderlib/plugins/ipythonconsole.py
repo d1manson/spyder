@@ -879,6 +879,8 @@ class IPythonConsole(SpyderPluginWidget):
 
         # Connect to our variable explorer
         if kernel_widget is not None and self.variableexplorer is not None:
+            pass            
+            """
             nsb = self.variableexplorer.currentWidget()
             # When the autorefresh button is active, our kernels
             # start to consume more and more CPU during time
@@ -892,7 +894,7 @@ class IPythonConsole(SpyderPluginWidget):
             nsb.auto_refresh_button.setEnabled(False)
             nsb.set_ipyclient(client)
             client.set_namespacebrowser(nsb)
-        
+            """
         # Connect client to our history log
         if self.historylog is not None:
             self.historylog.add_history(client.history_filename)

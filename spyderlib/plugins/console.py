@@ -31,10 +31,11 @@ from spyderlib.utils.qthelpers import (get_icon, create_action, add_actions,
 from spyderlib.utils.environ import EnvDialog
 from spyderlib.widgets.internalshell import InternalShell
 from spyderlib.widgets.findreplace import FindReplace
-from spyderlib.widgets.dicteditor import DictEditor
 from spyderlib.plugins import SpyderPluginWidget
 from spyderlib.py3compat import to_text_string, getcwd
 
+class DictEditor():
+    pass
 
 class Console(SpyderPluginWidget):
     """

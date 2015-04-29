@@ -940,7 +940,7 @@ class MainWindow(QMainWindow):
             # In light mode, namespace browser is opened inside external console
             # Here, it is opened as an independent plugin, in its own dockwidget
             self.set_splash(_("Loading namespace browser..."))
-            from spyderlib.plugins.variableexplorer import VariableExplorer
+            from spyderlib.widgets.dicteditor import VariableExplorer
             self.variableexplorer = VariableExplorer(self)
             self.variableexplorer.register_plugin()
 
@@ -952,10 +952,11 @@ class MainWindow(QMainWindow):
             self.ipyconsole.register_plugin()
 
         if not self.light:
+            """
             nsb = self.variableexplorer.add_shellwidget(self.console.shell)
             self.console.shell.refresh.connect(nsb.refresh_table)
             nsb.auto_refresh_button.setEnabled(False)
-
+            """
             self.set_splash(_("Setting up main window..."))
 
             # Help menu            

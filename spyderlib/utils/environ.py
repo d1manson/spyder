@@ -14,7 +14,6 @@ import os
 
 # Local imports
 from spyderlib.baseconfig import _
-from spyderlib.widgets.dicteditor import DictEditor
 
 
 def envdict2listdict(envdict):
@@ -31,6 +30,9 @@ def listdict2envdict(listdict):
         if isinstance(listdict[key], list):
             listdict[key] = os.path.pathsep.join(listdict[key])
     return listdict
+
+class DictEditor():
+    pass
 
 class RemoteEnvDialog(DictEditor):
     """Remote process environment variables Dialog"""

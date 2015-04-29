@@ -31,9 +31,9 @@ from spyderlib.qt.QtGui import (QMessageBox, QTableView, QItemDelegate,
                                 QDialog, QDateEdit, QDialogButtonBox, QMenu,
                                 QInputDialog, QDateTimeEdit, QApplication,
                                 QKeySequence, QAbstractItemDelegate, QLabel,
-                                QToolTip, QHeaderView)
+                                QToolTip, QHeaderView, QDockWidget)
 from spyderlib.qt.QtCore import (Qt, QModelIndex, QAbstractTableModel, Signal,
-                                 QDateTime, Slot)
+                                 QDateTime, Slot, QObject)
 from spyderlib.qt.compat import to_qvariant, from_qvariant, getsavefilename
 from spyderlib.utils.qthelpers import mimedata2url
 
@@ -46,15 +46,8 @@ from spyderlib.guiconfig import get_font
 from spyderlib.utils.misc import fix_reference_name
 from spyderlib.utils.qthelpers import (get_icon, add_actions, create_action,
                                        qapplication)
-from spyderlib.widgets.dicteditorutils import (sort_against, get_size,
-               get_human_readable_type, value_to_display, get_color_name,
-               is_known_type, FakeObject, Image, ndarray, array, MaskedArray,
-               unsorted_unique, try_to_eval, datestr_to_datetime,
-               get_numpy_dtype, is_editable_type, DataFrame, TimeSeries)
-if ndarray is not FakeObject:
-    from spyderlib.widgets.arrayeditor import ArrayEditor
-if DataFrame is not FakeObject:
-    from spyderlib.widgets.dataframeeditor import DataFrameEditor
+from spyderlib.widgets.dicteditorutils import (sort_against,
+               unsorted_unique)
 from spyderlib.widgets.texteditor import TextEditor
 from spyderlib.widgets.importwizard import ImportWizard
 from spyderlib.py3compat import (to_text_string, to_binary_string,
@@ -75,11 +68,19 @@ class BaseTableModel(QAbstractTableModel):
     get_basic_props in dictutils.  This dict contains the
     keys specified in ``column_keys`` (below) plus some other stuff.
     
+    The _data corresponds to the ``key_path`` tuple, which defines how to 
+    traverse from the root namespace down to a particular dict/list etc.
+    
     The job of this class is to map (row, col) to information that is needed
-    such as display strings, colors, tooltip info etc.
+    such as display strings, colors, tooltip info, edit mode etc.
     
     Note that although this is a "model", some of the information it offers
     is clearly more about rendering a view that raw "data" (e.g. colors).
+    
+    When this model needs to evaluate something, e.g. getting meta_dict,
+    it does it using ``self.command('get_meta_dict', key)``. This may
+    be executed locally, or it may be executed via monitor.py.  In both
+    cases it is synchronous (i.e. it stalls until the answer is received).
     """
     
     # these are the keys into the properties dict corresponding to
@@ -92,9 +93,11 @@ class BaseTableModel(QAbstractTableModel):
         'value_str': _('value')
     }
     
-    def __init__(self, parent, get_meta_dict_foo=lambda x: ()):
+    def __init__(self, parent, command):
         QAbstractTableModel.__init__(self, parent)
         self._data = () # empty tuple
+        self.key_path = ()
+        self.command = command
         
     def get_color_tuple(self, index, ignore_column=False):
         """Custom method used by Delegate.paint
@@ -115,7 +118,8 @@ class BaseTableModel(QAbstractTableModel):
         we choose to do it here instead as it allows us a bit more control.
         """
         basic_props = self._data[index.row()]
-        meta_props = get_meta_dict_foo(self.keys[row])
+        meta_props = self.command('make_meta_dict', 
+                                  self.key_path + (basic_props['key'],)) 
         
         value = basic_props['value_str']            
         if len(value) > 2000:
@@ -136,7 +140,7 @@ class BaseTableModel(QAbstractTableModel):
             meta_str = '<br><br>'\
                 + ' | '.join(["<b>%s:</b>&nbsp;%s"\
                               % (escape_for_html(k), escape_for_html(v)) \
-                              for k, v in meta_dict.iteritems()])
+                              for k, v in meta_props.iteritems()])
                         
         return _("<h2>%s</h2><b>type:</b> %s | <b>size:</b> %s%s%s%s")\
                     % (basic_props['key'], basic_props['type_str'], basic_props['size_str'],
@@ -150,7 +154,7 @@ class BaseTableModel(QAbstractTableModel):
         """Implement BaseClass's method, to provide info about a given cell."""
         if not index.isValid():
             return to_qvariant()
-        
+            
         props = self._data[index.row()]
         
         if role == Qt.DisplayRole:
@@ -176,15 +180,7 @@ class BaseTableModel(QAbstractTableModel):
                 self.column_header_names[self.columns_keys[i_column]])
         else:
             return to_qvariant()
-
-    def flags(self, index):
-        """Implement BaseClass's method...?"""
-        # This method was implemented in DictModel only, but to enable tuple
-        # exploration (even without editing), this method was moved here
-        if not index.isValid():
-            return Qt.ItemIsEnabled
-        return Qt.ItemFlags(QAbstractTableModel.flags(self, index)|
-                            Qt.ItemIsEditable)
+            
     def reset(self):
         self.beginResetModel()
         self.endResetModel()
@@ -193,45 +189,38 @@ class BaseTableModel(QAbstractTableModel):
         
 
 class BaseTableView(QTableView):
-    """Base dictionary editor table view"""
+    """This holds a BaseTableModel and makes it possible to render/interact 
+    with it.  Stuff for individual cells is handled by BaseTableViewDelegate"""
     sig_option_changed = Signal(str, object)
-    sig_files_dropped = Signal(list)
-    redirect_stdio = Signal(bool)
     
     def __init__(self, parent):
         QTableView.__init__(self, parent)
-        self.array_filename = None
-        self.menu = None
-        self.empty_ws_menu = None
-        self.paste_action = None
-        self.copy_action = None
-        self.edit_action = None
-        self.plot_action = None
-        self.hist_action = None
-        self.imshow_action = None
-        self.save_array_action = None
-        self.insert_action = None
-        self.remove_action = None
-        self.truncate_action = None
-        self.minmax_action = None
-        self.rename_action = None
-        self.duplicate_action = None
-        self.delegate = None
-        self.setAcceptDrops(True)
-        self.info_pane = None 
+        self.custom_tooltip = None 
+        self.tooltip_index = None
+        self.compact_mode_column = 0
+        self.compact = True
+        self.only_show_column = 'key'
+        self.compact_action = create_action(self, _("Compact mode"),
+                                            toggled=self.toggle_compact)
+        self.compact_action.setChecked(self.compact)
+        self.toggle_compact(self.compact)
+        menu_actions = [self.compact_action]
+        self.menu = QMenu(self)
+        add_actions(self.menu, menu_actions)
         
-        self.compact_mode_column= 0
-        self.info_pane_index = None
-                
+        
     def showRequestedColumns(self):
+        model = self.model()
+        if model is None:
+            return
         if self.compact:
-            for col in xrange(self.model.columnCount()):
-                if col != self.only_show_column:
-                    self.setColumnHidden(col,True)
+            for col_idx, col_key in enumerate(model.columns_keys):
+                if col_key != self.only_show_column:
+                    self.setColumnHidden(col_idx, True)
             self.horizontalHeader().setVisible(False)
         else:
-            for col in xrange(self.model.columnCount()):
-                self.setColumnHidden(col,False)  
+            for col_idx, _ in enumerate(model.columns_keys):
+                self.setColumnHidden(col_idx, False)  
             self.horizontalHeader().setVisible(True)
             
     def setModel(self, model):
@@ -244,147 +233,31 @@ class BaseTableView(QTableView):
         """Setup table"""
         self.horizontalHeader().setStretchLastSection(True)
         self.adjust_columns()
-        # Sorting columns
+
         self.setSortingEnabled(True)
         self.sortByColumn(0, Qt.AscendingOrder)
-    
-    def setup_menu(self):
-        """Setup context menu"""
-        if self.truncate_action is not None:
-            self.truncate_action.setChecked(self.model.truncate)
-            self.minmax_action.setChecked(self.model.minmax)
-            self.compact_action.setChecked(self.model.compact)
-            return
-        
-        self.compact_action = create_action(self, _("Compact mode"),
-                                            toggled=self.toggle_compact)
-        self.compact_action.setChecked(self.model.compact)
-        self.toggle_compact(self.model.compact)
-        resize_action = create_action(self, _("Resize rows to contents"),
-                                      triggered=self.resizeRowsToContents)
-        self.paste_action = create_action(self, _("Paste"),
-                                          icon=get_icon('editpaste.png'),
-                                          triggered=self.paste)
-        self.copy_action = create_action(self, _("Copy"),
-                                         icon=get_icon('editcopy.png'),
-                                         triggered=self.copy)                                      
-        self.edit_action = create_action(self, _("Edit"),
-                                         icon=get_icon('edit.png'),
-                                         triggered=self.edit_item)
-        self.plot_action = create_action(self, _("Plot"),
-                                    icon=get_icon('plot.png'),
-                                    triggered=lambda: self.plot_item('plot'))
-        self.plot_action.setVisible(False)
-        self.hist_action = create_action(self, _("Histogram"),
-                                    icon=get_icon('hist.png'),
-                                    triggered=lambda: self.plot_item('hist'))
-        self.hist_action.setVisible(False)
-        self.imshow_action = create_action(self, _("Show image"),
-                                           icon=get_icon('imshow.png'),
-                                           triggered=self.imshow_item)
-        self.imshow_action.setVisible(False)
-        self.save_array_action = create_action(self, _("Save array"),
-                                               icon=get_icon('filesave.png'),
-                                               triggered=self.save_array)
-        self.save_array_action.setVisible(False)
-        self.insert_action = create_action(self, _("Insert"),
-                                           icon=get_icon('insert.png'),
-                                           triggered=self.insert_item)
-        self.remove_action = create_action(self, _("Remove"),
-                                           icon=get_icon('editdelete.png'),
-                                           triggered=self.remove_item)
-        self.truncate_action = create_action(self, _("Truncate values"),
-                                             toggled=self.toggle_truncate)
-        self.truncate_action.setChecked(self.model.truncate)
-        self.toggle_truncate(self.model.truncate)
-        self.minmax_action = create_action(self, _("Show arrays min/max"),
-                                           toggled=self.toggle_minmax)
-        self.minmax_action.setChecked(self.model.minmax)
-        self.toggle_minmax(self.model.minmax)
-        self.rename_action = create_action(self, _( "Rename"),
-                                           icon=get_icon('rename.png'),
-                                           triggered=self.rename_item)
-        self.duplicate_action = create_action(self, _( "Duplicate"),
-                                              icon=get_icon('edit_add.png'),
-                                              triggered=self.duplicate_item)
-        menu = QMenu(self)
-        menu_actions = [self.edit_action, self.plot_action, self.hist_action,
-                        self.imshow_action, self.save_array_action,
-                        self.insert_action, self.remove_action,
-                        self.copy_action, self.paste_action,
-                        None, self.rename_action, self.duplicate_action,
-                        None, resize_action, self.compact_action,
-                        None, self.truncate_action,
-                        ]
-        if ndarray is not FakeObject:
-            menu_actions.append(self.minmax_action)
-        add_actions(menu, menu_actions)
-        self.empty_ws_menu = QMenu(self)
-        add_actions(self.empty_ws_menu,
-                    [self.insert_action, self.paste_action,
-                     None, resize_action, None, self.compact_action])
-        return menu
-            
-    #---------------------------------------------------------------------------
-            
-    def refresh_menu(self):
-        """Refresh context menu"""
-        index = self.currentIndex()
-        condition = index.isValid()
-        self.edit_action.setEnabled( condition )
-        self.remove_action.setEnabled( condition )
-        self.refresh_plot_entries(index)
-        
-    def refresh_plot_entries(self, index):
-        if index.isValid():
-            key = self.model.get_key(index)
-            is_list = self.is_list(key)
-            is_array = self.is_array(key) and self.get_len(key) != 0
-            condition_plot = (is_array and len(self.get_array_shape(key)) <= 2)
-            condition_hist = (is_array and self.get_array_ndim(key) == 1)
-            condition_imshow = condition_plot and self.get_array_ndim(key) == 2
-            condition_imshow = condition_imshow or self.is_image(key)
-        else:
-            is_array = condition_plot = condition_imshow = is_list \
-                     = condition_hist = False
-        self.plot_action.setVisible(condition_plot or is_list)
-        self.hist_action.setVisible(condition_hist or is_list)
-        self.imshow_action.setVisible(condition_imshow)
-        self.save_array_action.setVisible(is_array)
-        
-    def adjust_columns(self):
-        """Resize two first columns to contents"""
-        for col in range(3):
-            self.resizeColumnToContents(col)
-        
-    def set_data(self, data):
-        """Set table data"""
-        if data is not None:
-            self.model.set_data(data, self.dictfilter)
-            self.sortByColumn(0, Qt.AscendingOrder)
             
     def enterEvent(self,event):
         """Reimplement Qt method"""
-        if self.model.compact:
-            self.info_pane.show()
-            self.info_pane.showText("")
-            self.info_pane_index = None
+        if self.compact:
+            self.custom_tooltip.showText("")
+            self.tooltip_index = None
         QTableView.enterEvent(self,event)
         
     def leaveEvent(self,event):
         """Reimplement Qt method"""
-        if self.model.compact:
-            self.info_pane.hide()
-        self.info_pane_index = None
-        QTableView.leaveEvent(self,event)
+        if self.compact:
+            self.custom_tooltip.hide()
+        self.tooltip_index = None
+        QTableView.leaveEvent(self, event)
         
     def mouseMoveEvent(self, event):
         """Reimplement Qt method"""
         if self.compact:            
             index_over = self.indexAt(event.pos())
-            if index_over.isValid() and index_over.row() != self.info_pane_index:
-                self.info_pane.showText(index_over.model().get_full_info(index_over))
-                self.info_pane_index = index_over.row()
+            if index_over.isValid() and index_over.row() != self.tooltip_index:
+                self.custom_tooltip.showText(index_over.model().get_full_info(index_over))
+                self.tooltip_index = index_over.row()
             QTableView.mouseMoveEvent(self, event)
         
     def mousePressEvent(self, event):
@@ -410,7 +283,7 @@ class BaseTableView(QTableView):
             row = index_clicked.row()
             # TODO: Remove hard coded "Value" column number (3 here)
             index_clicked = index_clicked.child(row, self.only_show_column
-                                                 if self.model.compact else 3)
+                                                 if self.compact else 3)
             self.edit(index_clicked)
         else:
             event.accept()
@@ -430,29 +303,21 @@ class BaseTableView(QTableView):
         
     def contextMenuEvent(self, event):
         """Reimplement Qt method"""
-        if self.model.showndata:
-            self.refresh_menu()
-            self.menu.popup(event.globalPos())
-            event.accept()
-        else:
-            self.empty_ws_menu.popup(event.globalPos())
-            event.accept()
+        # index_clicked = self.indexAt(event.pos())
+        # TODO: customise menu based on index
+        self.menu.popup(event.globalPos())
+        event.accept()
 
     @Slot(bool)
     def toggle_compact(self, state):
         """Toggle compact view"""
         self.sig_option_changed.emit('compact', state)
-        self.model.compact = state
+        self.compact = state
         self.setMouseTracking(state)
-        if self.info_pane is None and state:
-            self.info_pane = InfoPane(self)
-        if state:
-            self.toggle_truncate(False)
-            self.info_pane.update_position()
-            self.verticalHeader().setResizeMode(QHeaderView.ResizeToContents)
-        else:
-            self.verticalHeader().setResizeMode(QHeaderView.Interactive)
-            
+        if self.custom_tooltip is None and state:
+            self.custom_tooltip = CustomTooltip(self)
+        self.verticalHeader().setResizeMode(
+            QHeaderView.ResizeToContents if state else QHeaderView.Interactive)            
         self.showRequestedColumns()
         self.resizeColumnsToContents()
         
@@ -462,11 +327,7 @@ class BaseTableView(QTableView):
         index = self.currentIndex()
         if not index.isValid():
             return
-        # TODO: Remove hard coded "Value" column number (3 here)
-        self.edit(index.child(index.row(), 
-                              self.compact_mode_columnif self.model.compact\
-                              else 3))
-
+        raise NotImplementedError
 
             
 class BaseTableViewDelegate(QItemDelegate):
@@ -495,10 +356,11 @@ class BaseTableViewDelegate(QItemDelegate):
         
     def createEditor(self, parent, option, index):
         """Reimplement Qt method"""
+        raise NotImplementedError 
+        """               
         model = index.model()
-        editor_switch = model.get_editor_switch(index)
-        raise NotImplementedError
-            
+        editor_switch = self.model.get_editor_switch(index)
+        """ 
             
 
 class CustomTooltip(QDialog):
@@ -555,76 +417,68 @@ class CustomTooltip(QDialog):
         self.main_text.setText(text)
         self.setVisible(len(text) > 0)
         
-
-
-#-----TEST TEST TEST TEST ----------------------------------------------------
-
-if __name__ == "__main__":
-    
-    def get_test_data():
-        """Create test data"""
-        import numpy as np
-        from spyderlib.pil_patch import Image
-        image = Image.fromarray(np.random.random_integers(255, size=(100, 100)),
-                                mode='P')
-        testdict = {'d': 1, 'a': np.random.rand(10, 10), 'b': [1, 2]}
-        testdate = datetime.date(1945, 5, 8)
-        class Foobar(object):
-            def __init__(self):
-                self.text = "toto"
-                self.testdict = testdict
-                self.testdate = testdate
-        foobar = Foobar()
-        return {'object': foobar,
-                'str': 'kjkj kj k j j kj k jkj',
-                'unicode': to_text_string('éù', 'utf-8'),
-                'list': [1, 3, [sorted, 5, 6], 'kjkj', None],
-                'tuple': ([1, testdate, testdict], 'kjkj', None),
-                'dict': testdict,
-                'float': 1.2233,
-                'int': 223,
-                'bool': True,
-                'array': np.random.rand(10, 10),
-                'masked_array': np.ma.array([[1, 0], [1, 0]],
-                                            mask=[[True, False], [False, False]]),
-                '1D-array': np.linspace(-10, 10),
-                'empty_array': np.array([]),
-                'image': image,
-                'date': testdate,
-                'datetime': datetime.datetime(1945, 5, 8),
-                'complex': 2+1j,
-                'complex64': np.complex64(2+1j),
-                'int8_scalar': np.int8(8),
-                'int16_scalar': np.int16(16),
-                'int32_scalar': np.int32(32),
-                'bool_scalar': np.bool(8),
-                'unsupported1': np.arccos,
-                'unsupported2': np.cast,
-                #1: (1, 2, 3), -5: ("a", "b", "c"), 2.5: np.array((4.0, 6.0, 8.0)),            
-                }
-    
-    def test():
-        """Dictionary editor test"""
-        app = qapplication() #analysis:ignore
-        dialog = DictEditor()
-        dialog.setup(get_test_data())
-        dialog.show()
-        app.exec_()
-        print("out:", dialog.get_value())
         
-    def remote_editor_test():
-        """Remote dictionary editor test"""
-        from spyderlib.plugins.variableexplorer import VariableExplorer
-        from spyderlib.widgets.externalshell.monitor import make_remote_view
-        remote = make_remote_view(get_test_data(), VariableExplorer.get_settings())
-        from pprint import pprint
-        pprint(remote)
-        app = qapplication()
-        dialog = DictEditor()
-        dialog.setup(remote, remote=True)
-        dialog.show()
-        app.exec_()
-        if dialog.result():
-            print(dialog.get_value())
+from spyderlib.plugins.variableexplorer import (VariableExplorerConfigPage, 
+    SpyderPluginMixin)
+
+class VariableExplorer(QWidget, SpyderPluginMixin):
+    """
+    Variable Explorer Plugin. It is the outermost widget. For now it simply
+    holds a single BaseTableView, stored in self.editor.
+    """
+    CONF_SECTION = 'variable_explorer'
+    CONFIGWIDGET_CLASS = VariableExplorerConfigPage
+    sig_option_changed = Signal(str, object)
+
+    def __init__(self, parent):
+        QWidget.__init__(self, parent)
+        SpyderPluginMixin.__init__(self, parent)
+        self.initialize_plugin()
+        self.editor = BaseTableView(self)
+        vlayout = QVBoxLayout()
+        vlayout.addWidget(self.editor)
+        self.setLayout(vlayout)
+        self.refresh_table()
         
-    remote_editor_test()
+    def refresh_table(self):
+        pass
+
+    def set_shellwidget_from_id(self, id):
+        pass
+    def add_shellwidget(self, shell):
+        pass
+
+    #------ SpyderPluginWidget API ---------------------------------------------
+    def get_plugin_title(self):
+        """Return widget title"""
+        return _('Variable explorer')
+
+    def get_plugin_icon(self):
+        """Return plugin icon"""
+        return get_icon('dictedit.png')
+    
+    def get_focus_widget(self):
+        """
+        Return the widget to give focus to when
+        this plugin's dockwidget is raised on top-level
+        """
+        return self.editor
+        
+    def closing_plugin(self, cancelable=False):
+        """Perform actions before parent main window is closed"""
+        return True
+        
+    def refresh_plugin(self):
+        """Refresh widget"""
+        pass
+    
+    def get_plugin_actions(self):
+        """Return a list of actions related to plugin"""
+        return []
+    
+    def register_plugin(self):
+        """Register plugin in Spyder's main window"""
+        self.main.extconsole.set_variableexplorer(self)
+        self.main.add_dockwidget(self)
+                  
+
