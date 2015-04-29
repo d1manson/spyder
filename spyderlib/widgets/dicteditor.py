@@ -95,7 +95,7 @@ class BaseTableModel(QAbstractTableModel):
     
     def __init__(self, parent, communicate, key_path=(), data=()):
         QAbstractTableModel.__init__(self, parent)
-        self._data = data
+        self._data = sorted(data, key=lambda props: props['key'].lower())
         self.key_path = key_path or () # if key_path was None
         self.communicate = communicate
         
@@ -119,14 +119,10 @@ class BaseTableModel(QAbstractTableModel):
         """
         basic_props = self._data[index.row()]
         cmd = 'get_meta_dict(%s)' % str((self.key_path + (basic_props['key'],)))
-        print(cmd)        
         meta_props = self.communicate(cmd)
         
         value = basic_props['value_str']            
-        if len(value) > 2000:
-            value = value[:2000].rstrip() + "..." # QLabel strugles with long strings
-
-        html_str = meta_str = value_str = "" 
+        html_str = meta_str = "" 
         if 'html' in meta_props:
             if meta_props['html'] is not None:
                 html_str = '<br><br>' + meta_props['html']
@@ -134,9 +130,14 @@ class BaseTableModel(QAbstractTableModel):
         if 'value' in meta_props:
             value = meta_props['value'] 
             del meta_props['value']
-        if value is not None:
+        if value is None:
+            value_str = ""
+        else:
+            if len(value) > 2000:
+                value = value[:2000].rstrip() + "..." # QLabel strugles with long strings
             value_str = "<br><br>" + escape_for_html(value)\
                                             .replace('\n','<br>')
+        
         if len(meta_props) > 0:
             meta_str = '<br><br>'\
                 + ' | '.join(["<b>%s:</b>&nbsp;%s"\

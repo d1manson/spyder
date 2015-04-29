@@ -362,10 +362,13 @@ class Monitor(threading.Thread):
         else:
             raise NotImplementedError
         
-    def get_meta_dict(self, name):
+    def get_meta_dict(self, keys_path):
         """Returns dict with min/max/nans etc. for the given object"""
-        ns = self.get_current_namespace()
-        return make_meta_dict(ns[name]) if name in ns else {}
+        val = self.get_current_namespace()
+        if keys_path is not None:
+            for key in keys_path:
+                val = val[key]
+        return make_meta_dict(val)
         
     def getcwd(self):
         """Return current working directory"""
