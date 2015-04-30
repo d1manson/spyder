@@ -1,20 +1,38 @@
 # -*- coding: utf-8 -*-
 #
 # Copyright © 2009-2010 Pierre Raybaut
+# Copyright © 2015 Daniel Manson github @d1manson
 # Licensed under the terms of the MIT License
 # (see spyderlib/__init__.py for details)
 
 """
 THIS IS NOT SIMPLE!!!
 
-There are several important things here.
+There is quite a lot going on in this file.  The major classes are:
 
-BaseTableModel - this stores a list of props dicts for each row
-BaseTableView - this handles the actual rendering/interactions with BaseTableModel
-BaseTableViewDelegate - this does some of the work that BaseTableView can't do itself
-
-
+VariableExplorer - this is the main widget/plugin which holds other things
+BaseTableModel - this holds the list of props dicts for each variable and knows
+                 how to map from (row, col) to individual props. 
+BaseTableView - this handles the actual rendering/interactions with BaseTableModel.
+                It is the widget which forms the main part of the VariableExplorer.
+BaseTableViewDelegate - this does some of the work that BaseTableView can't do itself.
+                specifically, it handles the custom painting of type info. The
+                BaseTableView has a single instance of this class to do the needed work.
+FilterWidget - This is the textbox at the bottom of the VariableExplorer. It's main 
+                interaction with the VariableExplorer is via its list_changed
+                Signal, and the .flist proeprty which holds the filter list.
+FilterWidgetHighlighter - this subclasses QSyntaxHighlighter and is used by
+                the FilterWidget.
 CustomTooltip - this subclasses QDialog, making it work like a giant tooltip
+
+There are a few smallish classes used for encapsulating simpler things:
+    
+ShellWrapper - this holds a reference to a shell and some meta data, including
+                a method for communicationg with the shell's introspection socket.
+                See monitor.py for the available commands.
+VariableFilter - this holds the info that defines a single variable filter, and
+                exposes a single method "match" which applies the filter, returning
+                a mask of Trues/Falses.
 """
 
 #TODO: Multiple selection: open as many editors (array/dict/...) as necessary,
@@ -35,27 +53,20 @@ from spyderlib.qt.QtGui import (QMessageBox, QTableView, QItemDelegate,
                                 QCompleter, QSplitter, QPlainTextEdit,
                                 QSyntaxHighlighter, QTextCharFormat)
 from spyderlib.qt.QtCore import (Qt, QModelIndex, QAbstractTableModel, Signal,
-                                 QDateTime, Slot, QObject, QSize)
-from spyderlib.qt.compat import to_qvariant, from_qvariant, getsavefilename
-from spyderlib.utils.qthelpers import mimedata2url
+                                 Slot, QSize)
+from spyderlib.qt.compat import to_qvariant
 from spyderlib.widgets.externalshell.monitor import communicate
-import sys
-import datetime
+
 
 # Local import
 from spyderlib.baseconfig import _
 from spyderlib.guiconfig import get_font
-from spyderlib.utils.misc import fix_reference_name
 from spyderlib.utils.qthelpers import (get_icon, add_actions, create_action,
                                        qapplication)
-from spyderlib.widgets.dicteditorutils import (sort_against,
-               unsorted_unique)
 from spyderlib.widgets.texteditor import TextEditor
 from spyderlib.widgets.importwizard import ImportWizard
-from spyderlib.py3compat import (to_text_string, to_binary_string,
-                                 is_text_string, is_binary_string, getcwd, u)
+from spyderlib.py3compat import (to_text_string, to_binary_string)
 
-from spyderlib.utils.makemetadict import make_meta_dict
 
 import re
 
@@ -89,14 +100,17 @@ class VariableFilter():
 # TODO: need a dialog for managing/creating filters like this and store in user prefs
 DEFAULT_FILTERS = [
      VariableFilter('scalars', kind='type_exact', list_=('int','float','str')),
+     VariableFilter('special_floats', kind='key_exact', list_=('e','euler_gamma',
+          'inf','Inf', 'Infinity', 'infty', 'NaN', 'nan', 'pi')),
      VariableFilter('functions', kind='type_exact', list_=('function','ufunc', 
-                                                'builtin_function_or_method')),
+                    'builtin_function_or_method', 'instancemethod')),
      VariableFilter('types_etc', kind='type_exact', list_=('type','module')),
      VariableFilter('privates', kind='key_regex', list_=(re.compile('^_'),)),
      VariableFilter('caps', kind='key_regex', list_=(re.compile('^[A-Z0-9_]+$'),)),
      VariableFilter('all', kind='all'),
      VariableFilter('iterables', kind='type_exact', list_=('dict','list','set',
-                                                           'tuple'))
+                                                           'tuple')),
+     VariableFilter('ipython_history', kind='key_exact', list_=('In','Out')),
 ]
 
 def escape_for_html(s):
@@ -587,7 +601,7 @@ class FilterWidget(QPlainTextEdit):
     """
     list_changed = Signal()
     
-    def __init__(self, parent):
+    def __init__(self, parent, txt):
         QPlainTextEdit.__init__(self, parent)
         self.setToolTip(_("Show/hide variables using +-filters.\n"
                     "e.g. '-uninteresting_types -caps_only +custom_things'"))
@@ -596,6 +610,9 @@ class FilterWidget(QPlainTextEdit):
         self.textChanged.connect(self._update_list)
         self.flist = () # a parsed version of the text with invalid stuff missing
         self.set_completer_list(())
+        self.setPlainText(txt)
+        self._update_list()
+
     def _update_list(self):
         """Called when text is change."""
         old_list = self.flist
@@ -682,16 +699,17 @@ class VariableExplorer(QWidget, SpyderPluginMixin):
         splitter = QSplitter(Qt.Vertical, self)
         vlayout.addWidget(splitter)
         splitter.addWidget(self.editor)
-        self.filter_box = FilterWidget(self)
+        txt = "-all +scalars +iterables -ipython_history -caps -special_floats -privates"
+        self.filter_box = FilterWidget(self, txt)
         self.filter_box.set_completer_list([f.name for f in DEFAULT_FILTERS])
         self.filter_box.list_changed.connect(self._filters_changed)
         splitter.addWidget(self.filter_box)
         splitter.setStretchFactor(0,1)
         splitter.setStretchFactor(1,0)
         self.setLayout(vlayout)
-        self.refresh_table()
         self.id_to_shell_wrapper = {}
         self.id_current_shell = None
+        self.refresh_table()
         
     def _filters_changed(self):
         """called when filter widget changes its list and when we create a 
@@ -703,22 +721,31 @@ class VariableExplorer(QWidget, SpyderPluginMixin):
             model.set_filters(DEFAULT_FILTERS, flist)
         
     def refresh_table(self):
-        pass
+        id_ = self.id_current_shell
+        if id_ is None:
+            return
+        comminicate_foo = self.id_to_shell_wrapper[id_].communicate 
+        root_data = comminicate_foo('get_props_for_variable_explorer()')
+        if root_data is not None:
+            model = BaseTableModel(self.editor, comminicate_foo,
+                                   None, root_data)
+            self.editor.setModel(model)
+            self._filters_changed() # apply filters to model
 
     def set_shellwidget_from_id(self, id_):
         if id_ in self.id_to_shell_wrapper and id_ != self.id_current_shell:
             self.id_current_shell = id_
-            comminicate_foo = self.id_to_shell_wrapper[id_].communicate 
-            root_data = comminicate_foo('get_props_for_variable_explorer()')
-            if root_data is not None:
-                model = BaseTableModel(self.editor, comminicate_foo,
-                                       None, root_data)
-                self.editor.setModel(model)
-                self._filters_changed() # apply filters to model
+            self.refresh_table()
         
     def add_shellwidget(self, shell):
         self.id_to_shell_wrapper[id(shell)] = ShellWrapper(shell) 
         
+    def remove_shellwidget(self, id_):
+        if id_ in self.id_to_shell_wrapper:
+            del self.id_to_shell_wrapper[id_]
+            if self.id_current_shell == id_:
+                self.editor.setModel(None)
+                self.id_current_shell = None
     #------ SpyderPluginWidget API ---------------------------------------------
     def get_plugin_title(self):
         """Return widget title"""
@@ -741,7 +768,7 @@ class VariableExplorer(QWidget, SpyderPluginMixin):
         
     def refresh_plugin(self):
         """Refresh widget"""
-        pass
+        self.refresh_table()
     
     def get_plugin_actions(self):
         """Return a list of actions related to plugin"""
