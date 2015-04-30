@@ -940,7 +940,7 @@ class MainWindow(QMainWindow):
             # In light mode, namespace browser is opened inside external console
             # Here, it is opened as an independent plugin, in its own dockwidget
             self.set_splash(_("Loading namespace browser..."))
-            from spyderlib.widgets.dicteditor import VariableExplorer
+            from spyderlib.widgets.variableexplorer import VariableExplorer
             self.variableexplorer = VariableExplorer(self)
             self.variableexplorer.register_plugin()
 
