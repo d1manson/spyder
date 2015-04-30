@@ -67,25 +67,26 @@ class VariableFilter():
         self.name = name
     def match(self, src):
         """ src is a list of simple props dicts on which to filter.
-        A list of the matching indices is returned. 
+        A mask list/tuple/generator is returned which is True for matching
+        elements and false elsewhere.
         
         You can thus use this for adding selectively from one list into another,
         or simply removing values from one list.
         """
         if self.kind == 'key_exact':
-            return [idx for idx, x in enumerate(src) if x['key'] in self.list_]
+            return (x['key'] in self.list_ for x in src)
         elif self.kind == 'key_regex':
-            return [idx for idx, x in enumerate(src) if \
-                    any(p.search(x['key']) is not None for p in self.list_)]
+            return (any(p.search(x['key']) is not None for p in self.list_) \
+                    for x in src)
         elif self.kind == 'type_exact':
-            return [idx for idx, x in enumerate(src) if \
-                    x['type_str'] in self.list_]
+            return (x['type_str'] in self.list_ for x in src)
         elif self.kind == 'all':
-            return range(len(src))
+            return (True,)*len(src)
         else:
             return []
     
 
+# TODO: need a dialog for managing/creating filters like this and store in user prefs
 DEFAULT_FILTERS = [
      VariableFilter('scalars', kind='type_exact', list_=('int','float','str')),
      VariableFilter('functions', kind='type_exact', list_=('function','ufunc', 
@@ -157,17 +158,26 @@ class BaseTableModel(QAbstractTableModel):
     def apply_filters(self):
         """Uses _valid_filters and _flist to filter the _data, and then 
         sorts data.
+        
+        We start with self._data and produce fdata. mask is the same lenght
+        as self._data and is True where the element is in fdata. We need to
+        know this incase we add stuff back in with "+somethign".
         """
-        fdata = list(self._data)
+        fdata = tuple(self._data)
+        mask = [True,]*len(fdata) # True = element still in fdata
         for fstr in self._flist:
             fobj = next(f for f in self._valid_filters if f.name == fstr[1:])
             if fstr[0] == "-":
-                rm_list = fobj.match(fdata)
-                fdata = [x for idx, x in enumerate(fdata) if idx not in rm_list]
+                # we need to do mask[mask==True] = ~need_to_rm ....
+                need_to_rm = tuple(fobj.match(fdata))
+                for sub, full in enumerate(idx for idx, msk \
+                                           in enumerate(mask) if msk):
+                    mask[full] = not need_to_rm[sub]                    
             elif fstr[0] == "+":
-                for k in fobj.match(self._data): # Note we match on full list
-                    fdata.append(self._data[k])
-    
+                # we need to do mask[need_to_add] = True...
+                need_to_add = fobj.match(self._data)
+                mask = list(msk or add for msk, add in zip(mask, need_to_add))                
+            fdata = tuple(x for x, msk in zip(self._data, mask) if msk)
         self._fdata = sorted(fdata, key=lambda props: props['key'].lower())
         self.reset()
         
@@ -307,7 +317,7 @@ class BaseTableView(QTableView):
         """Reimplement Qt method"""
         QTableView.setModel(self, model)
         self.showRequestedColumns()
-        self.resizeRowsToContents()
+        #self.resizeRowsToContents()  << TODO: this seems pretty slow
             
     def setup_table(self):
         """Setup table"""
@@ -433,7 +443,7 @@ class BaseTableViewDelegate(QItemDelegate):
             painter.save()
             rect = options.rect
             w = 4
-            left = rect.right() - len(color_tuple)*w
+            left = rect.right() - len(color_tuple)*w +1
             for ii, c in enumerate(color_tuple):
                 painter.fillRect(left + ii*w,rect.top(),w, rect.height(),
                              QColor(c))
@@ -681,6 +691,7 @@ class VariableExplorer(QWidget, SpyderPluginMixin):
         self.setLayout(vlayout)
         self.refresh_table()
         self.id_to_shell_wrapper = {}
+        self.id_current_shell = None
         
     def _filters_changed(self):
         """called when filter widget changes its list and when we create a 
@@ -695,7 +706,8 @@ class VariableExplorer(QWidget, SpyderPluginMixin):
         pass
 
     def set_shellwidget_from_id(self, id_):
-        if id_ in self.id_to_shell_wrapper:
+        if id_ in self.id_to_shell_wrapper and id_ != self.id_current_shell:
+            self.id_current_shell = id_
             comminicate_foo = self.id_to_shell_wrapper[id_].communicate 
             root_data = comminicate_foo('get_props_for_variable_explorer()')
             if root_data is not None:
@@ -703,10 +715,10 @@ class VariableExplorer(QWidget, SpyderPluginMixin):
                                        None, root_data)
                 self.editor.setModel(model)
                 self._filters_changed() # apply filters to model
-                
+        
     def add_shellwidget(self, shell):
         self.id_to_shell_wrapper[id(shell)] = ShellWrapper(shell) 
-
+        
     #------ SpyderPluginWidget API ---------------------------------------------
     def get_plugin_title(self):
         """Return widget title"""
