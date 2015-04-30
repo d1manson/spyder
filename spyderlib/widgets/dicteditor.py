@@ -99,7 +99,7 @@ class VariableFilter():
 
 # TODO: need a dialog for managing/creating filters like this and store in user prefs
 DEFAULT_FILTERS = [
-     VariableFilter('scalars', kind='type_exact', list_=('int','float','str')),
+     VariableFilter('scalars', kind='type_exact', list_=('int','float','str', 'unicode', 'long', 'complex')),
      VariableFilter('special_floats', kind='key_exact', list_=('e','euler_gamma',
           'inf','Inf', 'Infinity', 'infty', 'NaN', 'nan', 'pi')),
      VariableFilter('functions', kind='type_exact', list_=('function','ufunc', 
@@ -538,21 +538,23 @@ class ShellWrapper():
     """ShellWrapper holds reference to a shell (e.g. an IPython shell.)
     It knows how to send commands to the shell and get answers back.
     """
-    def __init__(self, shell):
+    def __init__(self, shell, is_ipy=None):
         """shell is a shellwidget"""
         from spyderlib.widgets import internalshell
         self.shell = shell
         self.shell_id = id(shell)
-        self.is_internal = isinstance(shell, internalshell.InternalShell),
-        self.is_ipykernel = shell.is_ipykernel
+        self.is_internal = isinstance(shell, internalshell.InternalShell)
+        self.is_ipykernel = getattr(shell, 'is_ipykernel', False)\
+                            if is_ipy is None else is_ipy
         
     def communicate(self, command, settings={}):
         """Sends a command to the shell and gets return value.
         See monitor.py for available commands and meanings.        
-        """
-        socket = self.shell.introspection_socket
-        if socket is not None:
-            return communicate(socket, command, settings)
+        """ 
+        if not self.is_internal:
+            socket = getattr(self.shell, 'introspection_socket', None)
+            if socket is not None:
+                return communicate(socket, command, settings)
          
 class FilterWidgetHighlighter(QSyntaxHighlighter):
     def __init__(self, doc, filterWidget):
@@ -610,7 +612,7 @@ class FilterWidget(QPlainTextEdit):
         self.textChanged.connect(self._update_list)
         self.flist = () # a parsed version of the text with invalid stuff missing
         self.set_completer_list(())
-        self.setPlainText(txt)
+        self.setPlainText(txt) # TODO: this sets the text, but no highlighting or filtering occurs until you enter text manually
         self._update_list()
 
     def _update_list(self):
@@ -737,8 +739,10 @@ class VariableExplorer(QWidget, SpyderPluginMixin):
             self.id_current_shell = id_
             self.refresh_table()
         
-    def add_shellwidget(self, shell):
-        self.id_to_shell_wrapper[id(shell)] = ShellWrapper(shell) 
+    def add_shellwidget(self, shell, is_ipy=None):
+        self.id_to_shell_wrapper[id(shell)] = ShellWrapper(shell, 
+                                                         is_ipy=is_ipy) 
+        self.set_shellwidget_from_id(id(shell))
         
     def remove_shellwidget(self, id_):
         if id_ in self.id_to_shell_wrapper:

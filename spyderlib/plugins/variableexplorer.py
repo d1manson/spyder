@@ -4,7 +4,11 @@
 # Licensed under the terms of the MIT License
 # (see spyderlib/__init__.py for details)
 
-"""Namespace Browser Plugin"""
+"""
+TODO: move this into dicteditor.py
+
+This file now only contains the config page for the variableexporer
+"""
 
 from spyderlib.qt.QtGui import (QStackedWidget, QGroupBox, QVBoxLayout, 
                                 QButtonGroup, QLabel)
