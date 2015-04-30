@@ -415,10 +415,10 @@ class Monitor(threading.Thread):
         """
         Return remote view of globals()
         """
-        communicate(self.n_request,
-            dict(command="props",
-                 data=('root', self.props_for_variable_explorer(None))))
-
+        # Hopefully this is now dealt with by ShellWrapper in variable explorer module
+        raise NotImplementedError
+    
+    
     def saveglobals(self):
         """Save globals() into filename"""
         raise NotImplementedError

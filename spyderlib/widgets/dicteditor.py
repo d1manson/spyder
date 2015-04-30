@@ -8,9 +8,13 @@
 """
 THIS IS NOT SIMPLE!!!
 
-There is quite a lot going on in this file.  The major classes are:
+There is quite a lot going on in this file.   Here's an overview of the classes:
 
 VariableExplorer - this is the main widget/plugin which holds other things
+ShellWrapper - this holds a reference to a shell and some meta data. It also has
+                a method for communicationg with the shell's introspection socket.
+                The on_refresh signal can be connected to listen for post-evaluation
+                of user input.  See monitor.py for the available commands.    
 BaseTableModel - this holds the list of props dicts for each variable and knows
                  how to map from (row, col) to individual props. 
 BaseTableView - this handles the actual rendering/interactions with BaseTableModel.
@@ -24,12 +28,6 @@ FilterWidget - This is the textbox at the bottom of the VariableExplorer. It's m
 FilterWidgetHighlighter - this subclasses QSyntaxHighlighter and is used by
                 the FilterWidget.
 CustomTooltip - this subclasses QDialog, making it work like a giant tooltip
-
-There are a few smallish classes used for encapsulating simpler things:
-    
-ShellWrapper - this holds a reference to a shell and some meta data, including
-                a method for communicationg with the shell's introspection socket.
-                See monitor.py for the available commands.
 VariableFilter - this holds the info that defines a single variable filter, and
                 exposes a single method "match" which applies the filter, returning
                 a mask of Trues/Falses.
@@ -543,6 +541,9 @@ class ShellWrapper(QObject):
 
     The intention is that this wrapper class should hide the details of
     what kind of shell we are dealing with. 
+    
+    I admit that I really don't understand the details of what is going on
+    with all the threads and processes. But if it works, it works.
     """
     on_refresh = Signal()
 
@@ -555,10 +556,14 @@ class ShellWrapper(QObject):
         self.is_internal = isinstance(shell, internalshell.InternalShell)
         self.is_ipykernel = getattr(shell, 'is_ipykernel', False)\
                             if is_ipy is None else is_ipy
+        # Hook up on_refresh to be emited when the user evaluates something in the kernel
         if not self.is_internal and not self.is_ipykernel:
-            # chain the event through to the on_refresh event
+            # This is the basic kernel kind            
             shell.notification_thread.refresh_namespace_browser.connect(
                                                             self.on_refresh)
+        elif self.is_ipykernel and hasattr(shell, "ipyclient"):
+            # this is the ipython kernel kind, although I don't fully understand it.
+            shell.ipyclient.shellwidget.executed.connect(self.on_refresh.emit)
 
     def communicate(self, command, settings={}):
         """Sends a command to the shell and gets return value.
