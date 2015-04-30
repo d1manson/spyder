@@ -32,9 +32,10 @@ from spyderlib.qt.QtGui import (QMessageBox, QTableView, QItemDelegate,
                                 QInputDialog, QDateTimeEdit, QApplication,
                                 QKeySequence, QAbstractItemDelegate, QLabel,
                                 QToolTip, QHeaderView, QDockWidget, QStyle,
-                                QCompleter, QSplitter)
+                                QCompleter, QSplitter, QPlainTextEdit,
+                                QSyntaxHighlighter, QTextCharFormat)
 from spyderlib.qt.QtCore import (Qt, QModelIndex, QAbstractTableModel, Signal,
-                                 QDateTime, Slot, QObject)
+                                 QDateTime, Slot, QObject, QSize)
 from spyderlib.qt.compat import to_qvariant, from_qvariant, getsavefilename
 from spyderlib.utils.qthelpers import mimedata2url
 from spyderlib.widgets.externalshell.monitor import communicate
@@ -460,7 +461,34 @@ class ShellWrapper():
         if socket is not None:
             return communicate(socket, command, settings)
          
-class FilterWidget(QLineEdit):
+class FilterWidgetHighlighter(QSyntaxHighlighter):
+    def __init__(self, doc, filterWidget):
+        QSyntaxHighlighter.__init__(self, doc)
+        self._parentFilterWidget = filterWidget
+        self.fmt_positive =  QTextCharFormat()
+        self.fmt_negative =  QTextCharFormat()        
+        color_ = QColor()
+        color_.setNamedColor('green')
+        self.fmt_positive.setForeground(color_)
+        color_ = QColor()
+        color_.setNamedColor('red')
+        self.fmt_negative.setForeground(color_)
+        
+    def highlightBlock(self, text):
+        p = 0
+        valid = self._parentFilterWidget.valid_words() 
+        for w in str(text).split(" "):
+            if w in valid:
+                if w[0] == '+':
+                    self.setFormat(p,len(w), self.fmt_positive)
+                elif w[0] == '-':
+                    self.setFormat(p,len(w), self.fmt_negative)
+            p += len(w) + 1
+            
+            
+        
+    
+class FilterWidget(QPlainTextEdit):
     """
     This is a fancy text box which lets you specify
     strings such as:
@@ -479,26 +507,46 @@ class FilterWidget(QLineEdit):
     fake_filter_names = ["uninteresting_types", "caps_only",
                          "my_special_regex"]
     def __init__(self, parent):
-        QLineEdit.__init__(self, parent)
+        QPlainTextEdit.__init__(self, parent)
         self.refresh_completer()
-        self.setToolTip(_("Show/hide variables by listing filters, "
-                    "each filter name should be prefixed with a '+'or '-'."))
-
+        self.setToolTip(_("Show/hide variables using +-filters.\n"
+                    "e.g. '-uninteresting_types -caps_only +custom_things'"))
+        self.highlight = FilterWidgetHighlighter(self.document(), self)        
+        
+    def sizeHint(self):
+        return QSize(self.width(), 26)
+    
+    def valid_words(self):
+        strs = []
+        for n in self.fake_filter_names:
+            strs += ['+' + n, '-' + n]
+        return strs
+            
     def refresh_completer(self):
         """This methods sets up the completer with a fixed
         list of filter names. It needs to be called if the
         list of filters changes, and on start up.
         """
-        strs = []
-        for n in self.fake_filter_names:
-            strs += ['+' + n, '-' + n]
-        self._completer = QCompleter(strs, self)
+        self._completer = QCompleter(self.valid_words(), self)
         #self.setCompleter(self._completer)
         self._completer.activated.connect(self.insertCompletion)
         self._completer.setWidget(self)
+        self._completer.setCaseSensitivity(Qt.CaseInsensitive);
     
+    def cursorPosition(self):
+        """QLineEdit has this method but not QPlainTextEdit"""
+        return self.textCursor().position()
+        
     def keyPressEvent(self, e):
-        QLineEdit.keyPressEvent(self,e)
+        if self._completer.popup().isVisible() and\
+                e.key() in (Qt.Key_Enter, 
+                            Qt.Key_Return,
+                            Qt.Key_Escape,
+                            Qt.Key_Tab
+                        ):
+            e.ignore()
+            return
+        QPlainTextEdit.keyPressEvent(self,e)
         c = self._completer
         prefix = self.cursorWord()
         c.setCompletionPrefix(prefix)
@@ -506,11 +554,14 @@ class FilterWidget(QLineEdit):
             c.popup().hide()
             return
         c.complete() 
+
+    def minimumSizeHint(self):
+        return QSize(self.width(), 28)
         
     def cursorWord(self):
         """Gets the characters since the last space up to the cursor.
         """
-        txt = self.text()
+        txt = self.toPlainText()
         cpos = self.cursorPosition()
         p = txt[:cpos].rfind(" ")
         return txt[p + 1 : cpos]
@@ -520,11 +571,8 @@ class FilterWidget(QLineEdit):
         We replace the text of the partially completed word
         with the full completed_word.
         """
-        txt = self.text()
-        cpos = self.cursorPosition()
-        p = txt[:cpos].rfind(" ")
-        self.setText(txt[:p+1] + str(completed_word) + txt[cpos:])
-
+        self.insertPlainText(\
+            str(completed_word)[len(self._completer.completionPrefix()):])
 
 class VariableExplorer(QWidget, SpyderPluginMixin):
     """
@@ -546,6 +594,8 @@ class VariableExplorer(QWidget, SpyderPluginMixin):
         splitter.addWidget(self.editor)
         self.filter_box = FilterWidget(self)
         splitter.addWidget(self.filter_box)
+        splitter.setStretchFactor(0,1)
+        splitter.setStretchFactor(1,0)
         self.setLayout(vlayout)
         self.refresh_table()
         self.id_to_shell_wrapper = {}
