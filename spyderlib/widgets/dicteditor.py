@@ -31,7 +31,8 @@ from spyderlib.qt.QtGui import (QMessageBox, QTableView, QItemDelegate,
                                 QDialog, QDateEdit, QDialogButtonBox, QMenu,
                                 QInputDialog, QDateTimeEdit, QApplication,
                                 QKeySequence, QAbstractItemDelegate, QLabel,
-                                QToolTip, QHeaderView, QDockWidget)
+                                QToolTip, QHeaderView, QDockWidget, QStyle,
+                                QCompleter, QSplitter)
 from spyderlib.qt.QtCore import (Qt, QModelIndex, QAbstractTableModel, Signal,
                                  QDateTime, Slot, QObject)
 from spyderlib.qt.compat import to_qvariant, from_qvariant, getsavefilename
@@ -352,6 +353,11 @@ class BaseTableViewDelegate(QItemDelegate):
     def paint(self, painter, options, index):
         """Reimplement Qt method"""
         model = index.model()
+
+        if options.state & QStyle.State_Selected:
+            # if it's not selected then render afterwards
+            QItemDelegate.paint(self, painter, options, index)
+        
         color_tuple = model.get_color_tuple(index)
         if color_tuple and len(color_tuple) > 0:
             painter.save()
@@ -362,7 +368,10 @@ class BaseTableViewDelegate(QItemDelegate):
                 painter.fillRect(left + ii*w,rect.top(),w, rect.height(),
                              QColor(c))
             painter.restore()
-        QItemDelegate.paint(self, painter, options, index)
+            
+        if not (options.state & QStyle.State_Selected):
+            # see above: we render before when in selected state
+            QItemDelegate.paint(self, painter, options, index)
         
     def createEditor(self, parent, option, index):
         """Reimplement Qt method"""
@@ -450,7 +459,73 @@ class ShellWrapper():
         socket = self.shell.introspection_socket
         if socket is not None:
             return communicate(socket, command, settings)
-            
+         
+class FilterWidget(QLineEdit):
+    """
+    This is a fancy text box which lets you specify
+    strings such as:
+        
+        -uninteresting_types -caps_only +my_special_regex
+        
+    Each of the names refers to a filter in the user's list
+    of filters, and the filters are applied in the order
+    specified, starting with the whole list of variables,
+    removing variables matching on a "-" filter, and adding
+    variables matching on a "+" filter.
+    
+    Multi word completer ported from C++ code:
+        http://stackoverflow.com/a/26544484/2399799
+    """
+    fake_filter_names = ["uninteresting_types", "caps_only",
+                         "my_special_regex"]
+    def __init__(self, parent):
+        QLineEdit.__init__(self, parent)
+        self.refresh_completer()
+        self.setToolTip(_("Show/hide variables by listing filters, "
+                    "each filter name should be prefixed with a '+'or '-'."))
+
+    def refresh_completer(self):
+        """This methods sets up the completer with a fixed
+        list of filter names. It needs to be called if the
+        list of filters changes, and on start up.
+        """
+        strs = []
+        for n in self.fake_filter_names:
+            strs += ['+' + n, '-' + n]
+        self._completer = QCompleter(strs, self)
+        #self.setCompleter(self._completer)
+        self._completer.activated.connect(self.insertCompletion)
+        self._completer.setWidget(self)
+    
+    def keyPressEvent(self, e):
+        QLineEdit.keyPressEvent(self,e)
+        c = self._completer
+        prefix = self.cursorWord()
+        c.setCompletionPrefix(prefix)
+        if len(prefix) < 1:
+            c.popup().hide()
+            return
+        c.complete() 
+        
+    def cursorWord(self):
+        """Gets the characters since the last space up to the cursor.
+        """
+        txt = self.text()
+        cpos = self.cursorPosition()
+        p = txt[:cpos].rfind(" ")
+        return txt[p + 1 : cpos]
+
+    def insertCompletion(self, completed_word):
+        """The completer issues its answer to this function.
+        We replace the text of the partially completed word
+        with the full completed_word.
+        """
+        txt = self.text()
+        cpos = self.cursorPosition()
+        p = txt[:cpos].rfind(" ")
+        self.setText(txt[:p+1] + str(completed_word) + txt[cpos:])
+
+
 class VariableExplorer(QWidget, SpyderPluginMixin):
     """
     Variable Explorer Plugin. It is the outermost widget. For now it simply
@@ -465,12 +540,16 @@ class VariableExplorer(QWidget, SpyderPluginMixin):
         SpyderPluginMixin.__init__(self, parent)
         self.initialize_plugin()
         self.editor = BaseTableView(self)
-        vlayout = QVBoxLayout()
-        vlayout.addWidget(self.editor)
+        vlayout = QVBoxLayout(self)
+        splitter = QSplitter(Qt.Vertical, self)
+        vlayout.addWidget(splitter)
+        splitter.addWidget(self.editor)
+        self.filter_box = FilterWidget(self)
+        splitter.addWidget(self.filter_box)
         self.setLayout(vlayout)
         self.refresh_table()
         self.id_to_shell_wrapper = {}
-
+        
     def refresh_table(self):
         pass
 
