@@ -57,7 +57,46 @@ from spyderlib.py3compat import (to_text_string, to_binary_string,
 
 from spyderlib.utils.makemetadict import make_meta_dict
 
-LARGE_NROWS = 5000
+import re
+
+class VariableFilter():
+    def __init__(self, name="blank", kind='type', list_=[]):
+        """ see .match method for details,  name is held for convenience."""
+        self.kind = kind.lower()
+        self.list_ = list_[:]
+        self.name = name
+    def match(self, src):
+        """ src is a list of simple props dicts on which to filter.
+        A list of the matching indices is returned. 
+        
+        You can thus use this for adding selectively from one list into another,
+        or simply removing values from one list.
+        """
+        if self.kind == 'key_exact':
+            return [idx for idx, x in enumerate(src) if x['key'] in self.list_]
+        elif self.kind == 'key_regex':
+            return [idx for idx, x in enumerate(src) if \
+                    any(p.search(x['key']) is not None for p in self.list_)]
+        elif self.kind == 'type_exact':
+            return [idx for idx, x in enumerate(src) if \
+                    x['type_str'] in self.list_]
+        elif self.kind == 'all':
+            return range(len(src))
+        else:
+            return []
+    
+
+DEFAULT_FILTERS = [
+     VariableFilter('scalars', kind='type_exact', list_=('int','float','str')),
+     VariableFilter('functions', kind='type_exact', list_=('function','ufunc', 
+                                                'builtin_function_or_method')),
+     VariableFilter('types_etc', kind='type_exact', list_=('type','module')),
+     VariableFilter('privates', kind='key_regex', list_=(re.compile('^_'),)),
+     VariableFilter('caps', kind='key_regex', list_=(re.compile('^[A-Z0-9_]+$'),)),
+     VariableFilter('all', kind='all'),
+     VariableFilter('iterables', kind='type_exact', list_=('dict','list','set',
+                                                           'tuple'))
+]
 
 def escape_for_html(s):
     return str(s).replace('&', '&amp;')\
@@ -97,21 +136,52 @@ class BaseTableModel(QAbstractTableModel):
     
     def __init__(self, parent, communicate, key_path=(), data=()):
         QAbstractTableModel.__init__(self, parent)
-        self._data = sorted(data, key=lambda props: props['key'].lower())
+        self._data = data
         self.key_path = key_path or () # if key_path was None
         self.communicate = communicate
+        self._valid_filters = ()
+        self._flist = ()
+        self.apply_filters()
+        
+    def set_filters(self, valid_filters, flist):
+        """
+        valid_filters is a list of VariableFilter instances,
+        flist is a list of the form: ["-something", "-other", "+that"],
+        where the names (after removing the +- prefix) correspond to
+        f.name for f in valid_filters
+         """
+        self._valid_filters = valid_filters
+        self._flist = flist
+        self.apply_filters()
+        
+    def apply_filters(self):
+        """Uses _valid_filters and _flist to filter the _data, and then 
+        sorts data.
+        """
+        fdata = list(self._data)
+        for fstr in self._flist:
+            fobj = next(f for f in self._valid_filters if f.name == fstr[1:])
+            if fstr[0] == "-":
+                rm_list = fobj.match(fdata)
+                fdata = [x for idx, x in enumerate(fdata) if idx not in rm_list]
+            elif fstr[0] == "+":
+                for k in fobj.match(self._data): # Note we match on full list
+                    fdata.append(self._data[k])
+    
+        self._fdata = sorted(fdata, key=lambda props: props['key'].lower())
+        self.reset()
         
     def get_color_tuple(self, index, ignore_column=False):
         """Custom method used by Delegate.paint
         """
         if ignore_column or self.columns_keys[index.column()] == 'key':
-            return self._data[index.row()]['flag_colors']
+            return self._fdata[index.row()]['flag_colors']
     
     def get_editor_switch(self, index, ignore_column=True):
         """Custom method used by Delegate.createEditor
         """
         if ignore_column or self.columns_keys[index.column()] == 'value':
-            return self._data[index.row()]['editor_switch']
+            return self._fdata[index.row()]['editor_switch']
         
     def get_full_info(self, index):
         """Custom method used for generating tooltip text. 
@@ -119,7 +189,7 @@ class BaseTableModel(QAbstractTableModel):
         Although we could do basically all this work inside the get_meta_dict_foo, 
         we choose to do it here instead as it allows us a bit more control.
         """
-        basic_props = self._data[index.row()]
+        basic_props = self._fdata[index.row()]
         cmd = 'get_meta_dict(%s)' % str((self.key_path + (basic_props['key'],)))
         meta_props = self.communicate(cmd)
         
@@ -158,14 +228,14 @@ class BaseTableModel(QAbstractTableModel):
     def rowCount(self, qindex=QModelIndex()):
         """Implement BaseClass's abstract method.
         Total number of displayable rows"""
-        return len(self._data)
+        return len(self._fdata)
         
     def data(self, index, role=Qt.DisplayRole):
         """Implement BaseClass's method, to provide info about a given cell."""
         if not index.isValid():
             return to_qvariant()
             
-        props = self._data[index.row()]
+        props = self._fdata[index.row()]
         if role == Qt.DisplayRole:
             return to_qvariant(props[self.columns_keys[index.column()]])
         elif role == Qt.EditRole:
@@ -218,7 +288,6 @@ class BaseTableView(QTableView):
         menu_actions = [self.compact_action]
         self.menu = QMenu(self)
         add_actions(self.menu, menu_actions)
-        
         
     def showRequestedColumns(self):
         model = self.model()
@@ -476,7 +545,7 @@ class FilterWidgetHighlighter(QSyntaxHighlighter):
         
     def highlightBlock(self, text):
         p = 0
-        valid = self._parentFilterWidget.valid_words() 
+        valid = self._parentFilterWidget.valid_names 
         for w in str(text).split(" "):
             if w in valid:
                 if w[0] == '+':
@@ -486,49 +555,60 @@ class FilterWidgetHighlighter(QSyntaxHighlighter):
             p += len(w) + 1
             
             
-        
-    
 class FilterWidget(QPlainTextEdit):
     """
     This is a fancy text box which lets you specify
     strings such as:
         
         -uninteresting_types -caps_only +my_special_regex
-        
+    
+    The idea is that...    
     Each of the names refers to a filter in the user's list
     of filters, and the filters are applied in the order
     specified, starting with the whole list of variables,
     removing variables matching on a "-" filter, and adding
     variables matching on a "+" filter.
     
-    Multi word completer ported from C++ code:
-        http://stackoverflow.com/a/26544484/2399799
+    This Widget takes care of completion, and syntax highlighting.
+    The ``flist`` property holds the current list of filter names,
+    including the +- prefix.  Invalid filters are not shown in this
+    list.
+    The list_changed signal fires when the list is updated.
     """
-    fake_filter_names = ["uninteresting_types", "caps_only",
-                         "my_special_regex"]
+    list_changed = Signal()
+    
     def __init__(self, parent):
         QPlainTextEdit.__init__(self, parent)
-        self.refresh_completer()
         self.setToolTip(_("Show/hide variables using +-filters.\n"
                     "e.g. '-uninteresting_types -caps_only +custom_things'"))
         self.highlight = FilterWidgetHighlighter(self.document(), self)        
-        
+        self.valid_names = () # e.g. ["+thing_a", "-thing_a", "+thing_b", ...]
+        self.textChanged.connect(self._update_list)
+        self.flist = () # a parsed version of the text with invalid stuff missing
+        self.set_completer_list(())
+    def _update_list(self):
+        """Called when text is change."""
+        old_list = self.flist
+        txt = self.toPlainText()
+        self.flist = []
+        for w in txt.split(" "):
+            if w in self.valid_names:
+                self.flist.append(w)
+        if old_list != self.flist:
+            self.list_changed.emit()
+                    
     def sizeHint(self):
         return QSize(self.width(), 26)
-    
-    def valid_words(self):
-        strs = []
-        for n in self.fake_filter_names:
-            strs += ['+' + n, '-' + n]
-        return strs
             
-    def refresh_completer(self):
+    def set_completer_list(self, new_list=()):
         """This methods sets up the completer with a fixed
         list of filter names. It needs to be called if the
         list of filters changes, and on start up.
         """
-        self._completer = QCompleter(self.valid_words(), self)
-        #self.setCompleter(self._completer)
+        self.valid_names = []
+        for n in new_list:
+            self.valid_names += ['+' + n, '-' + n]       
+        self._completer = QCompleter(self.valid_names, self)
         self._completer.activated.connect(self.insertCompletion)
         self._completer.setWidget(self)
         self._completer.setCaseSensitivity(Qt.CaseInsensitive);
@@ -556,7 +636,7 @@ class FilterWidget(QPlainTextEdit):
         c.complete() 
 
     def minimumSizeHint(self):
-        return QSize(self.width(), 28)
+        return QSize(0, 28)
         
     def cursorWord(self):
         """Gets the characters since the last space up to the cursor.
@@ -593,12 +673,23 @@ class VariableExplorer(QWidget, SpyderPluginMixin):
         vlayout.addWidget(splitter)
         splitter.addWidget(self.editor)
         self.filter_box = FilterWidget(self)
+        self.filter_box.set_completer_list([f.name for f in DEFAULT_FILTERS])
+        self.filter_box.list_changed.connect(self._filters_changed)
         splitter.addWidget(self.filter_box)
         splitter.setStretchFactor(0,1)
         splitter.setStretchFactor(1,0)
         self.setLayout(vlayout)
         self.refresh_table()
         self.id_to_shell_wrapper = {}
+        
+    def _filters_changed(self):
+        """called when filter widget changes its list and when we create a 
+        new model and need to apply the filters for the first time.
+        """
+        model = self.editor.model()
+        if model is not None:
+            flist = self.filter_box.flist
+            model.set_filters(DEFAULT_FILTERS, flist)
         
     def refresh_table(self):
         pass
@@ -611,7 +702,8 @@ class VariableExplorer(QWidget, SpyderPluginMixin):
                 model = BaseTableModel(self.editor, comminicate_foo,
                                        None, root_data)
                 self.editor.setModel(model)
-            
+                self._filters_changed() # apply filters to model
+                
     def add_shellwidget(self, shell):
         self.id_to_shell_wrapper[id(shell)] = ShellWrapper(shell) 
 
