@@ -184,7 +184,7 @@ def value_to_size_str(item):
         s = item.shape
     elif isinstance(item, Image):
         s = item.size
-    if isinstance(item, (DataFrame, TimeSeries)):
+    elif isinstance(item, (DataFrame, TimeSeries)):
         s = item.shape
     elif hasattr(item,'__len__'):
         s = len(item)

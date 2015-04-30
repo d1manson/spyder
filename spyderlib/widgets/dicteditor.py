@@ -558,9 +558,7 @@ class ShellWrapper(QObject):
         if not self.is_internal and not self.is_ipykernel:
             # chain the event through to the on_refresh event
             shell.notification_thread.refresh_namespace_browser.connect(
-                lambda: self.on_refresh.emit())
-    
-    
+                                                            self.on_refresh)
 
     def communicate(self, command, settings={}):
         """Sends a command to the shell and gets return value.
