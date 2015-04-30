@@ -53,7 +53,7 @@ from spyderlib.qt.QtGui import (QMessageBox, QTableView, QItemDelegate,
                                 QCompleter, QSplitter, QPlainTextEdit,
                                 QSyntaxHighlighter, QTextCharFormat)
 from spyderlib.qt.QtCore import (Qt, QModelIndex, QAbstractTableModel, Signal,
-                                 Slot, QSize)
+                                 Slot, QSize, QObject)
 from spyderlib.qt.compat import to_qvariant
 from spyderlib.widgets.externalshell.monitor import communicate
 
@@ -534,19 +534,34 @@ class CustomTooltip(QDialog):
 from spyderlib.plugins.variableexplorer import (VariableExplorerConfigPage, 
     SpyderPluginMixin)
 
-class ShellWrapper():
+class ShellWrapper(QObject):
     """ShellWrapper holds reference to a shell (e.g. an IPython shell.)
     It knows how to send commands to the shell and get answers back.
+
+    Connect to the on_refresh signal to get notification of refresh events
+    for the shell.
+
+    The intention is that this wrapper class should hide the details of
+    what kind of shell we are dealing with. 
     """
+    on_refresh = Signal()
+
     def __init__(self, shell, is_ipy=None):
         """shell is a shellwidget"""
+        QObject.__init__(self) # we need to subclass qobject in order to use signals
         from spyderlib.widgets import internalshell
         self.shell = shell
         self.shell_id = id(shell)
         self.is_internal = isinstance(shell, internalshell.InternalShell)
         self.is_ipykernel = getattr(shell, 'is_ipykernel', False)\
                             if is_ipy is None else is_ipy
-        
+        if not self.is_internal and not self.is_ipykernel:
+            # chain the event through to the on_refresh event
+            shell.notification_thread.refresh_namespace_browser.connect(
+                lambda: self.on_refresh.emit())
+    
+    
+
     def communicate(self, command, settings={}):
         """Sends a command to the shell and gets return value.
         See monitor.py for available commands and meanings.        
@@ -740,10 +755,11 @@ class VariableExplorer(QWidget, SpyderPluginMixin):
             self.refresh_table()
         
     def add_shellwidget(self, shell, is_ipy=None):
-        self.id_to_shell_wrapper[id(shell)] = ShellWrapper(shell, 
-                                                         is_ipy=is_ipy) 
+        wrapped_shell = ShellWrapper(shell, is_ipy=is_ipy) 
+        self.id_to_shell_wrapper[id(shell)] = wrapped_shell
         self.set_shellwidget_from_id(id(shell))
-        
+        wrapped_shell.on_refresh.connect(self.refresh_table)
+             
     def remove_shellwidget(self, id_):
         if id_ in self.id_to_shell_wrapper:
             del self.id_to_shell_wrapper[id_]
