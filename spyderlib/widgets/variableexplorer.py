@@ -102,7 +102,8 @@ DEFAULT_FILTERS = [
      VariableFilter('simples', kind='type_exact', list_=("int float"
          " complex long bool str unicode buffer int8 uint8 int16 uint16 int32"
          " uint32 int64 uint64 float16 float32 float64 complex64 complex128"
-         " datetime64 timedelta64").split(" ")),
+         " datetime64 timedelta64 DataFrame TimeSeries Image dict list"
+         " set tuple").split(" ")),
      VariableFilter('special_floats', kind='key_exact', list_=('e','euler_gamma',
           'inf','Inf', 'Infinity', 'infty', 'NaN', 'nan', 'pi')),
      VariableFilter('functions', kind='type_exact', list_=('function','ufunc', 
@@ -592,6 +593,7 @@ class FilterWidgetHighlighter(QSyntaxHighlighter):
         color_ = QColor()
         color_.setNamedColor('red')
         self.fmt_negative.setForeground(color_)
+
         
     def highlightBlock(self, text):
         p = 0
@@ -636,7 +638,7 @@ class FilterWidget(QPlainTextEdit):
         self.textChanged.connect(self._update_list)
         self.flist = () # a parsed version of the text with invalid stuff missing
         self.set_completer_list(())
-        self.setPlainText(txt) # TODO: this sets the text, but no highlighting or filtering occurs until you enter text manually
+        self.setPlainText(txt)
         self._update_list()
 
     def _update_list(self):
@@ -664,7 +666,8 @@ class FilterWidget(QPlainTextEdit):
         self._completer = QCompleter(self.valid_names, self)
         self._completer.activated.connect(self.insertCompletion)
         self._completer.setWidget(self)
-        self._completer.setCaseSensitivity(Qt.CaseInsensitive);
+        self._completer.setCaseSensitivity(Qt.CaseInsensitive)
+        self.highlight.rehighlight()
     
     def cursorPosition(self):
         """QLineEdit has this method but not QPlainTextEdit"""
@@ -725,7 +728,7 @@ class VariableExplorer(QWidget, SpyderPluginMixin):
         splitter = QSplitter(Qt.Vertical, self)
         vlayout.addWidget(splitter)
         splitter.addWidget(self.editor)
-        txt = "-all +simples +iterables -ipython_history -caps -special_floats -privates -misc_rubbish"
+        txt = "-all +simples -ipython_history -caps -special_floats -privates -misc_rubbish"
         self.filter_box = FilterWidget(self, txt)
         self.filter_box.set_completer_list([f.name for f in DEFAULT_FILTERS])
         self.filter_box.list_changed.connect(self._filters_changed)
