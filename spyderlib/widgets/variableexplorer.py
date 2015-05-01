@@ -68,7 +68,6 @@ from spyderlib.guiconfig import get_font
 from spyderlib.utils.qthelpers import (get_icon, add_actions, create_action)
 from spyderlib.plugins.variableexplorer_config import VariableExplorerConfigPage
 from spyderlib.plugins import SpyderPluginMixin
-
 import re
 
 class VariableFilter():
@@ -100,7 +99,10 @@ class VariableFilter():
 
 # TODO: need a dialog for managing/creating filters like this and store in user prefs
 DEFAULT_FILTERS = [
-     VariableFilter('scalars', kind='type_exact', list_=('int','float','str', 'unicode', 'long', 'complex')),
+     VariableFilter('simples', kind='type_exact', list_=("int float"
+         " complex long bool str unicode buffer int8 uint8 int16 uint16 int32"
+         " uint32 int64 uint64 float16 float32 float64 complex64 complex128"
+         " datetime64 timedelta64").split(" ")),
      VariableFilter('special_floats', kind='key_exact', list_=('e','euler_gamma',
           'inf','Inf', 'Infinity', 'infty', 'NaN', 'nan', 'pi')),
      VariableFilter('functions', kind='type_exact', list_=('function','ufunc', 
@@ -112,6 +114,9 @@ DEFAULT_FILTERS = [
      VariableFilter('iterables', kind='type_exact', list_=('dict','list','set',
                                                            'tuple')),
      VariableFilter('ipython_history', kind='key_exact', list_=('In','Out')),
+     VariableFilter('misc_rubbish', kind='key_exact', list_=("little_endian"
+     " ScalarType sctypeDict sctypeNA sctypes typecodes typeDict typeNA"
+     " using_mklfft".split(" ")))
 ]
 
 def escape_for_html(s):
@@ -720,7 +725,7 @@ class VariableExplorer(QWidget, SpyderPluginMixin):
         splitter = QSplitter(Qt.Vertical, self)
         vlayout.addWidget(splitter)
         splitter.addWidget(self.editor)
-        txt = "-all +scalars +iterables -ipython_history -caps -special_floats -privates"
+        txt = "-all +simples +iterables -ipython_history -caps -special_floats -privates -misc_rubbish"
         self.filter_box = FilterWidget(self, txt)
         self.filter_box.set_completer_list([f.name for f in DEFAULT_FILTERS])
         self.filter_box.list_changed.connect(self._filters_changed)
