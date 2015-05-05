@@ -225,7 +225,7 @@ def value_to_color_tuple(value):
     """
     try:
         mro = getmro(value)
-    except AttributeError:
+    except (AttributeError, KeyError):
         try:
             mro = getmro(type(value))
         except Exception:
