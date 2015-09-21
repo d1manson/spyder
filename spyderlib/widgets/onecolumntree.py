@@ -14,7 +14,7 @@ They are also used in Spyder through the Plugin interface
 (see spyderlib.plugins)
 """
 
-from spyderlib.qt.QtCore import Slot
+from spyderlib.qt.QtCore import Slot, Qt
 from spyderlib.qt.QtGui import QTreeWidget, QMenu
 import spyderlib.utils.icon_manager as ima
 
@@ -29,6 +29,9 @@ class OneColumnTree(QTreeWidget):
         QTreeWidget.__init__(self, parent)
         self.setItemsExpandable(True)
         self.setColumnCount(1)
+        self.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(self.contextMenuEvent)
+        
         self.itemActivated.connect(self.activated)
         self.itemClicked.connect(self.clicked)
         # Setup context menu
@@ -212,9 +215,20 @@ class OneColumnTree(QTreeWidget):
         for index, item in enumerate(items):
             self.insertTopLevelItem(index, item)
         self.restore_expanded_state()
-                     
-    def contextMenuEvent(self, event):
-        """Override Qt method"""
+            
+    def mouseReleaseEvent(self, event):
+        """ http://stackoverflow.com/a/31317570/2399799 """
+        if event.button() != Qt.RightButton:
+            super(OneColumnTree, self).mouseReleaseEvent(event)
+            
+    def contextMenuEvent(self, pos):
+        """See the following two lines in __init__:
+            self.setContextMenuPolicy(Qt.CustomContextMenu)
+            self.customContextMenuRequested.connect(self.contextMenuEvent)
+            and...
+            https://wiki.python.org/moin/PyQt/Creating%20a%20context
+                                                %20menu%20for%20a%20tree%20view
+        """
         self.update_menu()
-        self.menu.popup(event.globalPos())
+        self.menu.popup(self.viewport().mapToGlobal(pos))
         
