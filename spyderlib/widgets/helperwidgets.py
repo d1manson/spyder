@@ -8,18 +8,50 @@
 Helper widgets.
 """
 
-from spyderlib.qt.QtCore import QPoint, QSize, Qt
+from spyderlib.qt.QtCore import QPoint, QSize, Qt, QObject, Slot
 from spyderlib.qt.QtGui import (QToolButton, QToolTip,
                                 QStyledItemDelegate, QApplication,
                                 QTextDocument, QStyleOptionViewItem,
                                 QAbstractTextDocumentLayout, QStyle,
-                                QVBoxLayout, QSpacerItem,
-                                QMessageBox, QCheckBox)
+                                QVBoxLayout, QSpacerItem, QHBoxLayout,
+                                QMessageBox, QCheckBox, QWidget)
+from spyderlib.utils.qthelpers import create_action
 
 from spyderlib.config.base import _
 from spyderlib.utils.qthelpers import get_std_icon
 
-
+class WidgetInnerToolbar(QWidget):
+    """A light-weight toolbar-like widget which can be toggled on/off like
+    a proper toolbar. Usage: Layout.addWidget(WidgetInnerToolbar)"""
+    
+    def __init__(self, buttons):
+        """Expects a sequence of buttons, each of which is made using
+        the helper function called create_toolbutton."""
+        QWidget.__init__(self)
+        self._layout = QHBoxLayout()
+        self.setLayout(self._layout)
+        self._layout.setAlignment(Qt.AlignLeft)
+        self._layout.setContentsMargins(0, 0, 0, 0)
+        
+        for btn in buttons:
+            self._layout.addWidget(btn)
+        self._dummy_parent = QObject()
+        self._toggle_view_action = create_action(self._dummy_parent,
+                                                 "toggle WidgetInnerToolbar",
+                                                 toggled=self.toggleEvent)
+        self._toggle_view_action.setChecked(True)
+    
+    @Slot(bool)
+    def toggleEvent(self, v):
+        """handler for toggle_view_action"""
+        self.setVisible(v)
+    
+    def toggleViewAction(self):
+        return self._toggle_view_action
+        
+    def objectName(self):
+        return None
+        
 class HelperToolButton(QToolButton):
     """Subclasses QToolButton, to provide a simple tooltip on mousedown.
     """
