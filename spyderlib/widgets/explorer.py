@@ -999,16 +999,13 @@ class ExplorerWidget(QWidget):
     redirect_stdio = Signal(bool)
 
     def __init__(self, parent=None, name_filters=['*.py', '*.pyw'],
-                 show_all=False, show_cd_only=None, show_icontext=True):
+                 show_all=False, show_cd_only=None):
         QWidget.__init__(self, parent)
 
         # Widgets
         self.treewidget = ExplorerTreeWidget(self, show_cd_only=show_cd_only)
         
         # Actions
-        icontext_action = create_action(self, _("Show icons and text"))
-        icontext_action.setChecked(show_icontext)
-
         previous_action = create_action(self, text=_("Previous"),
                             icon=ima.icon('ArrowBack'),
                             triggered=self.treewidget.go_to_previous_directory)
@@ -1026,14 +1023,12 @@ class ExplorerWidget(QWidget):
         # Setup widgets
         self.treewidget.setup(name_filters=name_filters, show_all=show_all)
         self.treewidget.chdir(getcwd())
-        self.treewidget.common_actions += [None, icontext_action, None, 
+        self.treewidget.common_actions += [None, 
                                            previous_action, next_action,
                                            parent_action]
 
         self.treewidget.update_menu()
         self.toolbar = context_menu_to_toolbar(self, self.treewidget.menu)
-        #icontext_action.connect(self.toolbar.toggle_icontext) #TODO: connect this properly
-        self.toolbar.toggle_icontext(show_icontext)
         
         layout = QVBoxLayout()
         layout.addWidget(self.toolbar)
