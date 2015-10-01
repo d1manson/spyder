@@ -28,7 +28,7 @@ from spyderlib.config.main import CONF
 from spyderlib.config.gui import get_color_scheme, get_font, set_font
 from spyderlib.utils import programs
 from spyderlib.utils.qthelpers import (add_actions, create_action,
-                                       context_menu_to_toolbar)
+                                       context_menu_to_toolbar, ComboAction)
 from spyderlib.widgets.comboboxes import EditableComboBox
 from spyderlib.widgets.sourcecode import codeeditor
 from spyderlib.widgets.findreplace import FindReplace
@@ -355,6 +355,8 @@ class SphinxThread(QThread):
         self.html_ready.emit(html_text)
 
 
+
+        
 class ObjectInspector(SpyderPluginWidget):
     """
     Docstrings viewer widget
@@ -444,14 +446,16 @@ class ObjectInspector(SpyderPluginWidget):
                                                 toggled=self.toggle_show_source)
         self.rich_text_action = create_action(self, _("Rich Text"),
                                          toggled=self.toggle_rich_text)
-        display_mode_group = QActionGroup(self)
+        self.display_mode_group = display_mode_group = QActionGroup(self)
         display_mode_group.setExclusive(True)
         display_mode_group.addAction(self.plain_text_action)
         display_mode_group.addAction(self.rich_text_action)
+        display_mode_group.addAction(self.show_source_action)
+
         self.rich_text_action.setEnabled(sphinxify is not None)
         display_menu = QMenu(_('Display'), parent=self)
         add_actions(display_menu, [self.plain_text_action, self.rich_text_action,
-                                None, self.show_source_action])
+                                   self.show_source_action])
         self.common_actions += [display_menu]        
 
         # Extra (c): lock button
@@ -466,7 +470,11 @@ class ObjectInspector(SpyderPluginWidget):
         self.auto_import_action.setChecked(self.get_option('automatic_import'))
         self.common_actions += [self.auto_import_action, None]
         
-
+        self.combo_action = ComboAction(self, text=_("Object: "))
+        self.combo_action.combo.addItem(_("dummy name a"))
+        self.combo_action.combo.addItem(_("dummy name b"))
+        self.common_actions += [self.combo_action]
+        
         # Add common_actions and build toolbar...
         add_actions(self.rich_text.menu, self.common_actions)  
         add_actions(self.plain_text.editor.readonly_menu, self.common_actions)  
@@ -474,6 +482,7 @@ class ObjectInspector(SpyderPluginWidget):
         self.toolbar = context_menu_to_toolbar(self, self.rich_text.menu)
         context_menu_to_toolbar(menu=self.plain_text.editor.readonly_menu,
                                  old=self.toolbar)
+        
         
         #self.source_combo.currentIndexChanged.connect(self.source_is_console)
         
@@ -910,28 +919,29 @@ class ObjectInspector(SpyderPluginWidget):
 
     @Slot(bool)
     def toggle_plain_text(self, checked):
-        """Toggle plain text docstring"""
+        """Display plain text docstring, not rich text or source."""
         if checked:
-            self.docstring = checked
+            self.docstring = True
             self.switch_to_plain_text()
             self.force_refresh()
         self.set_option('rich_mode', not checked)
 
     @Slot(bool)
     def toggle_show_source(self, checked):
-        """Toggle show source code"""
+        """Display source, not rich/plain text docstring"""
         if checked:
             self.switch_to_plain_text()
-        self.docstring = not checked
-        self.force_refresh()
+            self.docstring = False
+            self.force_refresh()
         self.set_option('rich_mode', not checked)
 
     @Slot(bool)
     def toggle_rich_text(self, checked):
-        """Toggle between sphinxified docstrings or plain ones"""
+        """Display sphinxified docstrings not plain ones or source."""
         if checked:
-            self.docstring = not checked
+            self.docstring = False
             self.switch_to_rich_text()
+            self.force_refresh()
         self.set_option('rich_mode', checked)
 
     @Slot(bool)

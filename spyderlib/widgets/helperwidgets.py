@@ -15,7 +15,7 @@ from spyderlib.qt.QtGui import (QToolButton, QToolTip,
                                 QAbstractTextDocumentLayout, QStyle,
                                 QVBoxLayout, QSpacerItem, QHBoxLayout,
                                 QMessageBox, QCheckBox, QWidget, QMenu,
-                                QStackedWidget, QSizePolicy)
+                                QStackedWidget, QSizePolicy, QAction)
 
 
 from spyderlib.config.base import _
@@ -59,7 +59,7 @@ class WidgetInnerToolbar(QWidget):
         switch between using modes using .select_mode(index).
         """
         # TODO: fix import issues, so this isn't local
-        from spyderlib.utils.qthelpers import add_actions        
+        from spyderlib.utils.qthelpers import add_actions     
         
         layout = QHBoxLayout()
         layout.setAlignment(Qt.AlignLeft)
